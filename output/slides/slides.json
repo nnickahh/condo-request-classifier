@@ -1,0 +1,17 @@
+{
+  "title": "Management Agent classifier showcase",
+  "slide_count": 8,
+  "titles": [
+    "Management Agent",
+    "Resident intake",
+    "Classifier workflow",
+    "Structured classification",
+    "Urgent reports and human review",
+    "Batch review",
+    "Local evaluation results",
+    "Local startup"
+  ],
+  "measurements_date": "2026-10-03",
+  "source_video": "../demo/Management_Agent_Classifier_Demo.mp4",
+  "notes": "Slide text and comparison table are editable in PPTX. Images show authentic synthetic demonstration screens. The video predates the live Ollama evaluation."
+}

@@ -1,0 +1,51 @@
+1
+00:00:00,450 --> 00:00:05,698
+Meet Management Agent, a classifier for condominium resident requests.
+
+2
+00:00:05,878 --> 00:00:11,055
+It turns a message into a category, priority, and suggested team.
+
+3
+00:00:12,200 --> 00:00:19,864
+A resident reports a flickering corridor light. Staff enter the message and, optionally, its location.
+
+4
+00:00:21,033 --> 00:00:26,084
+The classifier identifies maintenance and suggests the maintenance team.
+
+5
+00:00:26,264 --> 00:00:31,527
+The model score stays visible, and uncertain requests are flagged for review.
+
+6
+00:00:32,658 --> 00:00:37,632
+A child trapped in a lift triggers an emergency flag before any model call.
+
+7
+00:00:37,812 --> 00:00:42,172
+The app prompts human action; it does not dispatch help.
+
+8
+00:00:43,325 --> 00:00:50,141
+Staff can upload a CSV inbox, inspect the classifications, and export the results.
+
+9
+00:00:50,321 --> 00:00:53,365
+No tickets are created automatically.
+
+10
+00:00:54,533 --> 00:01:00,689
+The starter workflow classified fifty three of fifty five synthetic examples correctly.
+
+11
+00:01:00,869 --> 00:01:05,193
+This is a development check, not real resident accuracy.
+
+12
+00:01:06,325 --> 00:01:12,861
+The offline demo is ready. The Ollama adapter still needs live model evaluation.
+
+13
+00:01:13,041 --> 00:01:17,962
+Next: label real resident requests and calibrate the classifier.

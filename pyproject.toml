@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "condo-jev-triage"
+version = "0.2.0"
+description = "Jev System-One condominium resident request triage using Choice, Score, and Noul primitives with LangGraph and Streamlit."
+readme = "readme.md"
+requires-python = ">=3.11,<3.14"
+dependencies = [
+    "langchain-ollama>=1.0,<2",
+    "langgraph>=1.0,<2",
+    "pydantic>=2.10,<3",
+    "python-dotenv>=1.0,<2",
+    "scikit-learn>=1.6,<2",
+    "streamlit>=1.50,<2",
+    "typesafe-sdk>=0.7,<1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0,<10",
+]
+
+[tool.setuptools.packages.find]
+include = ["condo_jev*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

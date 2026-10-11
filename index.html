@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="A classifier-first condominium management prototype: resident messages become categories, priorities, suggested teams and staff review decisions.">
+  <title>Condominium Request Classifier - Project Showcase</title>
+  <style>
+    :root { color-scheme: dark; --bg:#0b202b; --panel:rgba(18, 46, 57, 0.90); --ink:#f5f8f5; --muted:#adc5ca; --mint:#76e1bd; }
+    * { box-sizing:border-box; }
+    body {
+      margin:0;
+      background-color:var(--bg);
+      background-image: linear-gradient(90deg, rgba(11, 32, 43, 0.92) 0%, rgba(11, 32, 43, 0.72) 50%, rgba(11, 32, 43, 0.45) 100%), url("output/hero/condo-bg.jpg");
+      background-size: cover;
+      background-position: center top;
+      background-attachment: fixed;
+      color:var(--ink);
+      font:17px/1.6 system-ui,-apple-system,"Segoe UI",sans-serif;
+    }
+    main,footer { max-width:1160px; margin:auto; padding:0 28px; }
+    header { padding:64px 0 42px; }
+    .eyebrow { color:var(--mint); text-transform:uppercase; letter-spacing:.16em; font-size:12px; font-weight:700; }
+    h1 { font-size:clamp(34px,6vw,68px); line-height:1.08; letter-spacing:-.04em; max-width:900px; margin:20px 0; }
+    h2 { font-size:clamp(25px,3vw,36px); letter-spacing:-.025em; margin:0 0 12px; }
+    h3 { color:var(--mint); margin:0 0 8px; font-size:20px; }
+    p { max-width:780px; color:var(--muted); }
+    a { color:var(--mint); text-underline-offset:4px; }
+    a:hover { color:white; }
+    a:focus-visible,summary:focus-visible,video:focus-visible { outline:3px solid var(--mint); outline-offset:5px; }
+    nav { display:flex; flex-wrap:wrap; gap:12px; margin-top:28px; }
+    .button { display:inline-block; border:1px solid #54727b; padding:10px 18px; border-radius:7px; text-decoration:none; font-size:15px; font-weight:650; }
+    .button.primary { color:var(--bg); background:var(--mint); border-color:var(--mint); }
+    section { margin-bottom:64px; scroll-margin-top:24px; }
+    img,video { display:block; width:100%; height:auto; border-radius:9px; background:var(--panel); }
+    video { max-height:75vh; }
+    figure { margin:0; }
+    figcaption { font-size:14px; color:var(--muted); margin-top:10px; }
+    .pair { display:grid; grid-template-columns:1fr 1fr; gap:24px; }
+    .triad { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:24px; margin-top:24px; }
+    .card { padding:22px; background:var(--panel); border-radius:9px; border:1px solid #244653; }
+    .card p { margin:0; font-size:15px; }
+    .slides { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:24px; margin-top:28px; }
+    .note { padding:18px 22px; border-left:3px solid var(--mint); background:var(--panel); border-radius:0 8px 8px 0; }
+    .note p { margin:0; }
+    code { color:var(--ink); }
+    footer { border-top:1px solid #36515c; padding-top:24px; padding-bottom:40px; font-size:14px; }
+    @media(max-width:650px) { main,footer { padding-left:20px; padding-right:20px; } header { padding-top:36px; } .pair,.triad,.slides { grid-template-columns:1fr; } section { margin-bottom:44px; } }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <div class="eyebrow">Condo Jev Triage · System-One Classifier</div>
+    <h1>Structured Decisions<br>for Modern Estates.</h1>
+    <p>Turn inbound condominium resident messages into calibrated department categories, urgency scores, and staff review decisions. Powered by TypeSafe Jev System-One primitives (<code>Choice</code>, <code>Score</code>, and <code>Noul</code>), LangGraph orchestration, an offline TF-IDF simulator, and optional local Ollama inference.</p>
+    <nav aria-label="Showcase navigation">
+      <a class="button primary" href="#demo">Watch the demo</a>
+      <a class="button" href="#slides">View the 8 slides</a>
+      <a class="button" href="#jev">Jev Primitives</a>
+      <a class="button" href="#run">Run locally</a>
+    </nav>
+  </header>
+  <section aria-label="Project overview">
+    <figure>
+      <a href="output/hero/01-classifier-showcase.png"><img src="output/hero/01-classifier-showcase.png" width="1672" height="941" alt="Condo Jev Triage hero illustration showing a resident request becoming a structured Jev System-One decision."></a>
+      <figcaption>Condo Jev Triage · System-One Product Overview. <a href="output/hero/01-classifier-showcase.png" download>Download image</a></figcaption>
+    </figure>
+  </section>
+  <section id="demo">
+    <div class="eyebrow">01 / Walkthrough</div>
+    <h2>See the classifier in action.</h2>
+    <p>This walkthrough follows a resident request from multi-channel intake through Jev System-One evaluation, emergency safety screening, batch CSV triage, and the 60-case benchmark.</p>
+    <video controls playsinline preload="metadata" poster="output/demo/poster.png" aria-label="Narrated classifier demonstration with captions">
+      <source src="output/demo/Management_Agent_Classifier_Demo.mp4" type="video/mp4">
+      Your browser cannot play this video. <a href="output/demo/Management_Agent_Classifier_Demo.mp4">Download the MP4</a>.
+    </video>
+    <p><a href="output/demo/Management_Agent_Classifier_Demo.mp4" download>Download MP4</a> · <a href="output/demo/captions.srt" download>Download captions</a></p>
+    <div class="note"><p>Launch the interactive Streamlit app locally to test live policy threshold sliders, side-by-side engine comparisons, and auto-generated resident replies.</p></div>
+  </section>
+  <section id="jev">
+    <div class="eyebrow">02 / Design &amp; Jev System-One</div>
+    <h2>How a request becomes a decision.</h2>
+    <p>Validated input flows through deterministic safety rules, parallel Jev System-One classification primitives (<code>Choice</code>, <code>Score</code>, and <code>Noul</code>), and configurable review policy thresholds.</p>
+    <figure>
+      <a href="output/hero/02-classifier-architecture.png"><img loading="lazy" src="output/hero/02-classifier-architecture.png" width="1672" height="941" alt="How Jev System-One Triage Works architecture diagram."></a>
+      <figcaption>How Jev System-One Triage Works. <a href="output/hero/02-classifier-architecture.png" download>Download image</a></figcaption>
+    </figure>
+    <div class="triad">
+      <div class="card">
+        <h3>Choice (<code>department_category</code>)</h3>
+        <p>Selects one primary estate department from 10 fixed categories and returns both the full probability distribution and a concentration confidence score in <code>[0, 1]</code>.</p>
+      </div>
+      <div class="card">
+        <h3>Score (<code>urgency_level</code>)</h3>
+        <p>Rates operational urgency along a 4-level ordered rubric (<code>low</code> → <code>normal</code> → <code>high</code> → <code>emergency</code>), returning a continuous score in <code>[0, 1]</code>.</p>
+      </div>
+      <div class="card">
+        <h3>Noul (4 Binary Guardrails)</h3>
+        <p>Evaluates 4 parallel Yes/No questions returning <code>P(yes) ∈ [0, 1]</code>: <code>life_safety_hazard</code>, <code>multi_intent_request</code>, <code>adversarial_or_sensitive</code>, and <code>requires_human_triage</code>.</p>
+      </div>
+    </div>
+  </section>
+  <section id="slides">
+    <div class="eyebrow">03 / Presentation</div>
+    <h2>Eight slides. The complete Jev System-One story.</h2>
+    <p>Open any slide at full 1920×1080 resolution, read the multi-page PDF, or download the PowerPoint deck.</p>
+    <nav aria-label="Presentation downloads">
+      <a class="button primary" href="output/slides/Management_Agent_Classifier_Showcase.pdf">Read PDF</a>
+      <a class="button" href="output/slides/Management_Agent_Classifier_Showcase.pptx" download>Download PowerPoint</a>
+      <a class="button" href="output/slides/index.html">Open slide viewer</a>
+    </nav>
+    <div class="slides">
+      <figure><a href="output/slides/slide-01.png"><img loading="lazy" src="output/slides/slide-01.png" alt="Slide 1: Condo Jev Triage executive overview"></a><figcaption>01 / Executive overview</figcaption></figure>
+      <figure><a href="output/slides/slide-02.png"><img loading="lazy" src="output/slides/slide-02.png" alt="Slide 2: Multi-channel resident intake"></a><figcaption>02 / Multi-channel intake</figcaption></figure>
+      <figure><a href="output/slides/slide-03.png"><img loading="lazy" src="output/slides/slide-03.png" alt="Slide 3: LangGraph & Jev System-One pipeline"></a><figcaption>03 / LangGraph &amp; Jev pipeline</figcaption></figure>
+      <figure><a href="output/slides/slide-04.png"><img loading="lazy" src="output/slides/slide-04.png" alt="Slide 4: Structured triage output & telemetry"></a><figcaption>04 / Triage card &amp; telemetry</figcaption></figure>
+      <figure><a href="output/slides/slide-05.png"><img loading="lazy" src="output/slides/slide-05.png" alt="Slide 5: Four parallel Noul safety guardrails"></a><figcaption>05 / Noul safety guardrails</figcaption></figure>
+      <figure><a href="output/slides/slide-06.png"><img loading="lazy" src="output/slides/slide-06.png" alt="Slide 6: High-volume batch inbox triage"></a><figcaption>06 / Batch inbox triage</figcaption></figure>
+      <figure><a href="output/slides/slide-07.png"><img loading="lazy" src="output/slides/slide-07.png" alt="Slide 7: 60-case held-out evaluation benchmark"></a><figcaption>07 / 60-case benchmark</figcaption></figure>
+      <figure><a href="output/slides/slide-08.png"><img loading="lazy" src="output/slides/slide-08.png" alt="Slide 8: Local startup & verification"></a><figcaption>08 / Local startup &amp; CLI</figcaption></figure>
+    </div>
+  </section>
+  <section id="run" class="note"><h2>Run it yourself.</h2><p>Start the Streamlit interface with <code>.\start_project.cmd</code> or <code>.\.venv\Scripts\python.exe -m streamlit run app.py</code>, then open <code>http://localhost:8501</code>. The offline Jev simulator needs no API key.</p></section>
+</main>
+<footer>Condo Jev Triage · Powered by TypeSafe Jev System-One (Choice · Score · Noul) &amp; LangGraph · All examples are synthetic.</footer>
+</body>
+</html>
