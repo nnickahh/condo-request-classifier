@@ -1472,8 +1472,9 @@ def main() -> None:
         st.session_state.pop("compare_result", None)
 
     with st.container(key="tablet_panel"):
-        cmms_tab, single_tab, batch_tab, evaluation_tab, guide_tab, showcase_tab = st.tabs(
+        resident_tab, cmms_tab, single_tab, batch_tab, evaluation_tab, guide_tab, showcase_tab = st.tabs(
             [
+                "🏢 Resident Portal & Policy FAQ",
                 "🛠️ Operations Dashboard & Review Desk",
                 "Classify a request",
                 "Batch review",
@@ -2016,6 +2017,249 @@ def main() -> None:
                     "application/json",
                 )
 
+        with resident_tab:
+            st.markdown(
+                f'<div class="hero-topbar">'
+                f'<div class="hero-topbar-title">🏢 {CONDO_NAME} — Resident Services & FAQ Concierge</div>'
+                f'<div class="hero-engine-pill">✦ RAG Knowledge Base · Instant Policy Answers</div>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+            st.markdown(
+                f"Welcome to the official resident services portal for **{CONDO_NAME}** (MCST No. {MCST_NO}). "
+                f"Ask policy questions, check facility operating hours, lodge maintenance requests with photo evidence, or track your active tickets."
+            )
+
+            # Contact & Status strip
+            st.markdown(
+                f'<div style="background:rgba(56,189,248,0.06); border:1px solid rgba(56,189,248,0.22); border-radius:8px; padding:10px 16px; margin-bottom:16px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; font-size:0.88rem;">'
+                f'<div>🕒 <strong>Office Hours:</strong> {ESTATE_OFFICE_HOURS}</div>'
+                f'<div>📞 <strong>Estate Office:</strong> <code style="color:#38bdf8;">{ESTATE_OFFICE_PHONE}</code></div>'
+                f'<div>🚨 <strong>Guardhouse (24/7):</strong> <code style="color:#ef4444;">{GUARDHOUSE_PHONE}</code></div>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+
+            res_sub1, res_sub2, res_sub3 = st.tabs(
+                [
+                    "🔍 Ask AI Concierge & Policy FAQ (RAG)",
+                    "📝 Lodge a Maintenance Request (Web Intake)",
+                    "🔎 Track My Work Order",
+                ]
+            )
+
+            with res_sub1:
+                st.subheader("Estate Knowledge Base & Policy Inquiry")
+                st.write("Type your question below to retrieve authoritative estate policies, booking fees, hours, and by-laws.")
+
+                # Quick query buttons
+                st.caption("Quick inquiry suggestions:")
+                sc1, sc2, sc3, sc4, sc5 = st.columns(5)
+                if sc1.button("🏊 Pool Hours", key="btn_faq_pool", width="stretch"):
+                    st.session_state["resident_faq_input"] = "What are the swimming pool hours?"
+                if sc2.button("🏋️ Gym Rules", key="btn_faq_gym", width="stretch"):
+                    st.session_state["resident_faq_input"] = "Is the gym open 24 hours and can I bring guests?"
+                if sc3.button("🍖 BBQ Booking", key="btn_faq_bbq", width="stretch"):
+                    st.session_state["resident_faq_input"] = "How do I book the BBQ pit and how much is deposit?"
+                if sc4.button("🚗 Visitor Parking", key="btn_faq_park", width="stretch"):
+                    st.session_state["resident_faq_input"] = "What are the visitor parking charges and overnight rules?"
+                if sc5.button("🔨 Renovation Hours", key="btn_faq_reno", width="stretch"):
+                    st.session_state["resident_faq_input"] = "What are the permitted renovation hours on Saturday?"
+
+                faq_query = st.text_input(
+                    "Your Question:",
+                    value=st.session_state.get("resident_faq_input", ""),
+                    placeholder="e.g., Can I bring my dog to the swimming pool? How to pay maintenance fee via PayNow?",
+                    key="resident_faq_text_input",
+                )
+
+                if faq_query.strip():
+                    rag_result = answer_condo_enquiry(faq_query)
+                    if rag_result and rag_result.get("answered"):
+                        clean_content = rag_result["reply"]
+                        header_prefix = f"*{CONDO_NAME} — {rag_result['title']}*\n──────────────────────────────\n"
+                        if clean_content.startswith(header_prefix):
+                            clean_content = clean_content[len(header_prefix):]
+                        st.markdown(
+                            f'<div style="background:rgba(34,197,94,0.08); border:1px solid #22c55e; border-radius:8px; padding:14px 18px; margin-top:10px;">'
+                            f'<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">'
+                            f'<span style="font-weight:700; font-size:1.05rem; color:#4ade80;">✅ {rag_result["title"]}</span>'
+                            f'<span style="background:rgba(34,197,94,0.2); color:#4ade80; border:1px solid #22c55e; padding:2px 8px; border-radius:4px; font-size:0.75rem; font-weight:700;">'
+                            f'{rag_result["category"]} · Match: {rag_result["confidence"]:.0%}</span>'
+                            f'</div>'
+                            f'<div style="white-space:pre-wrap; line-height:1.6; color:#e2e8f0;">{clean_content}</div>'
+                            f'</div>',
+                            unsafe_allow_html=True,
+                        )
+                    else:
+                        st.info(
+                            f"ℹ️ **No specific estate policy matched for:** \"{faq_query.strip()}\"\n\n"
+                            f"• If this is a **maintenance fault or defect** (e.g. water leak, broken light, lift trapped), please use the **📝 Lodge a Maintenance Request** tab.\n"
+                            f"• For personalized assistance, contact the Estate Office at **{ESTATE_OFFICE_PHONE}** ({ESTATE_OFFICE_HOURS}) or Guardhouse at **{GUARDHOUSE_PHONE}**."
+                        )
+
+                st.markdown("<hr style='margin: 1.5rem 0; opacity: 0.2;'>", unsafe_allow_html=True)
+                st.markdown("#### 📚 Complete Estate Policy Directory (15 Articles)")
+                st.caption("Browse authoritative rules and facility terms for Emerald Bay Residences:")
+
+                categories = get_all_categories()
+                for cat in categories:
+                    articles = get_articles_by_category(cat)
+                    with st.expander(f"📁 {cat} ({len(articles)} articles)"):
+                        for art in articles:
+                            st.markdown(f"**{art['title']}** (`{art['article_id']}`)")
+                            st.caption(f"Summary: {art['summary']}")
+                            st.markdown(art['content'])
+                            st.markdown("---")
+
+            with res_sub2:
+                st.subheader("Resident Maintenance & Defect Intake")
+                st.write("Submit a maintenance request or report a common-property fault. Our Jev System-One triage will assess priority, estimate resolution SLA, and dispatch the duty contractor.")
+
+                res_store = WorkOrderStore()
+
+                with st.form("resident_web_intake_form", clear_on_submit=False):
+                    f_col1, f_col2 = st.columns([1, 1])
+                    with f_col1:
+                        web_unit = st.text_input("Unit / Location *", placeholder="e.g. #08-14, Tower 2 Lift Lobby, or B1 Gym", key="web_intake_unit")
+                        web_name = st.text_input("Resident Name (Optional)", placeholder="e.g. Alice Tan", key="web_intake_name")
+                    with f_col2:
+                        web_contact = st.text_input("Contact Number or Telegram Handle (Optional)", placeholder="e.g. +65 9123 4567 or @alicetan", key="web_intake_contact")
+                        web_photo = st.file_uploader("Upload Photo Evidence (Optional)", type=["jpg", "jpeg", "png"], key="web_intake_photo")
+
+                    web_text = st.text_area(
+                        "Issue Description *",
+                        placeholder="Please describe what is faulty or requires attention (e.g., The corridor light outside #08-14 is flickering and dim).",
+                        height=100,
+                        key="web_intake_desc",
+                    )
+                    web_submit = st.form_submit_button("🚀 Submit Request to Estate CMMS", type="primary")
+
+                if web_submit:
+                    clean_desc = web_text.strip()
+                    clean_unit = web_unit.strip()
+                    if not clean_desc:
+                        st.error("Please enter a description of the issue.")
+                    elif not clean_unit:
+                        st.error("Please enter your unit number or defect location.")
+                    else:
+                        req_obj = ResidentRequest(text=clean_desc, channel="Resident Web Portal", location=clean_unit)
+                        triage_res = service().classify(req_obj)
+
+                        # Handle photo upload if present
+                        saved_photo_path = None
+                        if web_photo is not None:
+                            att_dir = ROOT / "data/attachments"
+                            att_dir.mkdir(parents=True, exist_ok=True)
+                            photo_filename = f"web_{int(time.time())}_{web_photo.name.replace(' ', '_')}"
+                            target_dest = att_dir / photo_filename
+                            target_dest.write_bytes(web_photo.getvalue())
+                            saved_photo_path = str(target_dest.relative_to(ROOT)).replace("\\", "/")
+
+                        new_wo = res_store.create_work_order(
+                            request=req_obj,
+                            classification=triage_res,
+                            resident_id=web_contact or "web_user",
+                            resident_name=web_name or "Resident (Web)",
+                            photo_path=saved_photo_path,
+                            attachment_filename=web_photo.name if web_photo else None,
+                        )
+
+                        st.success(f"🎉 Work Order **#{new_wo.work_order_id}** created and queued for dispatch!")
+
+                        r_col1, r_col2 = st.columns([1.5, 1.0])
+                        with r_col1:
+                            st.markdown(
+                                f'<div style="background:rgba(56,189,248,0.08); border:1px solid rgba(56,189,248,0.3); border-radius:8px; padding:14px;">'
+                                f'<div style="font-size:1.1rem; font-weight:700; color:#38bdf8;">Work Order: {new_wo.work_order_id}</div>'
+                                f'<div><strong>Department:</strong> {new_wo.category_title} ➔ {new_wo.assigned_team}</div>'
+                                f'<div><strong>Priority / SLA:</strong> <span style="font-weight:700;">{new_wo.priority.value.upper()}</span> ({new_wo.sla_target})</div>'
+                                f'<div><strong>Location:</strong> {new_wo.location}</div>'
+                                f'<div><strong>Status:</strong> {new_wo.status}</div>'
+                                f'<hr style="margin:8px 0; opacity:0.2;">'
+                                f'<div style="font-size:0.9rem; color:#cbd5e1;"><em>"{new_wo.resident_reply}"</em></div>'
+                                f'</div>',
+                                unsafe_allow_html=True,
+                            )
+                        with r_col2:
+                            if saved_photo_path and Path(saved_photo_path).exists():
+                                st.image(saved_photo_path, caption=f"Evidence: {web_photo.name}", use_container_width=True)
+                            else:
+                                st.info("No photo attached. You can check ticket progress anytime in the **🔎 Track My Work Order** tab.")
+
+            with res_sub3:
+                st.subheader("Track Your Work Order Status")
+                st.write("Enter your Work Order ID (e.g. `WO-EST-1052` or `1052`) or your Unit Number (e.g. `#14-08`) to view live technician progress, status, and resolution details.")
+
+                track_query = st.text_input("Enter Work Order ID or Unit #:", placeholder="e.g. WO-EST-1050 or #08-14", key="track_wo_input")
+                if track_query.strip():
+                    track_store = WorkOrderStore()
+                    clean_q = track_query.strip().upper()
+                    matched_wos = []
+                    for wo_item in track_store.list_all(limit=300):
+                        if (
+                            clean_q in wo_item.work_order_id.upper()
+                            or clean_q in wo_item.ticket_id.upper()
+                            or (wo_item.location and clean_q.replace("#", "") in wo_item.location.upper().replace("#", ""))
+                        ):
+                            matched_wos.append(wo_item)
+
+                    if matched_wos:
+                        st.write(f"Found **{len(matched_wos)}** matching ticket(s):")
+                        for t_wo in matched_wos[:5]:
+                            with st.container():
+                                st.markdown(
+                                    f'<div style="border:1px solid rgba(255,255,255,0.12); border-radius:8px; padding:12px 16px; margin-bottom:12px; background:rgba(255,255,255,0.03);">'
+                                    f'<div style="display:flex; justify-content:space-between; align-items:center;">'
+                                    f'<span style="font-weight:700; font-size:1.05rem; color:#38bdf8;">#{t_wo.work_order_id} ({t_wo.ticket_id})</span>'
+                                    f'<span style="background:rgba(56,189,248,0.2); color:#38bdf8; border:1px solid #0284c7; padding:2px 8px; border-radius:4px; font-weight:700; font-size:0.8rem;">{t_wo.status}</span>'
+                                    f'</div>'
+                                    f'<div style="margin-top:6px; color:#cbd5e1;">📍 <strong>Location:</strong> {t_wo.location or "Pending"} | 🛠️ <strong>Team:</strong> {t_wo.assigned_team} | ⏱️ <strong>SLA:</strong> {t_wo.sla_target}</div>'
+                                    f'<div style="margin-top:4px; font-style:italic; color:#94a3b8;">"{t_wo.text}"</div>'
+                                    f'</div>',
+                                    unsafe_allow_html=True,
+                                )
+
+                                # Technician details
+                                if t_wo.assigned_technician:
+                                    st.markdown(
+                                        f"👷 **Assigned Technician:** `{t_wo.assigned_technician}` "
+                                        f"({'Contact: ' + t_wo.technician_phone if t_wo.technician_phone else ''}) "
+                                        f"({'Vendor: ' + t_wo.technician_vendor if t_wo.technician_vendor else ''})"
+                                    )
+
+                                # Photo display
+                                if t_wo.photo_path and Path(t_wo.photo_path).exists():
+                                    st.image(t_wo.photo_path, caption=f"Attached Evidence: {Path(t_wo.photo_path).name}", width=320)
+
+                                # Resolution & Feedback / Reopen controls
+                                if t_wo.status == WorkOrderStatus.RESOLVED.value:
+                                    st.success(f"✅ **Resolution Summary:** {t_wo.resolution_summary or 'Completed by technician'}")
+                                    st.markdown("**Verify & Sign Off:**")
+                                    act_c1, act_c2 = st.columns([1, 1])
+                                    with act_c1:
+                                        with st.form(f"rate_form_{t_wo.work_order_id}"):
+                                            stars = st.slider("Rate Technician Service (1–5 Stars):", 1, 5, 5, key=f"star_rate_{t_wo.work_order_id}")
+                                            feedback_txt = st.text_input("Comment (Optional):", key=f"feed_txt_{t_wo.work_order_id}")
+                                            if st.form_submit_button("⭐ Confirm Resolution & Rate"):
+                                                track_store.submit_feedback(t_wo.work_order_id, rating=stars, comment=feedback_txt)
+                                                track_store.close_work_order(t_wo.work_order_id, note=f"Confirmed and rated {stars}/5 stars by resident on web portal.")
+                                                st.success("Thank you for your feedback! Work order closed.")
+                                                st.rerun()
+                                    with act_c2:
+                                        with st.form(f"reopen_form_{t_wo.work_order_id}"):
+                                            reopen_reason = st.text_input("Reason issue persists:", placeholder="e.g. Water leak started again", key=f"reopen_reason_{t_wo.work_order_id}")
+                                            if st.form_submit_button("🔄 Reopen Work Order", type="secondary"):
+                                                track_store.reopen_work_order(t_wo.work_order_id, reason=reopen_reason or "Issue still persists (Web reopen)")
+                                                st.warning("Work order reopened and escalated for staff review.")
+                                                st.rerun()
+
+                                elif t_wo.status == WorkOrderStatus.CLOSED.value:
+                                    rating_str = f" ⭐ ({t_wo.resident_feedback_rating}/5)" if t_wo.resident_feedback_rating else ""
+                                    st.caption(f"Archived & Closed{rating_str}. Resolution: {t_wo.resolution_summary or 'Completed'}")
+                    else:
+                        st.info(f"No active work orders found matching '{track_query}'. Please verify your ticket ID or unit number.")
+
         with cmms_tab:
             st.markdown(
                 '<div class="hero-topbar">'
@@ -2062,12 +2306,13 @@ def main() -> None:
             )
             st.markdown("<div style='height: 1rem;'></div>", unsafe_allow_html=True)
 
-            cmms_sub1, cmms_sub2, cmms_sub3, cmms_sub4 = st.tabs(
+            cmms_sub1, cmms_sub2, cmms_sub3, cmms_sub4, cmms_sub5 = st.tabs(
                 [
                     "📋 Live Work Orders & Dispatch",
                     "👷 Technician & Vendor Roster",
                     "🔌 REST API & Webhooks",
                     "📊 CMMS Analytics",
+                    "📖 Policy Knowledge Base & FAQs",
                 ]
             )
 
@@ -2669,6 +2914,36 @@ def main() -> None:
                         st.bar_chart(status_chart_df)
                     else:
                         st.caption("No data available.")
+
+            with cmms_sub5:
+                st.subheader("Estate Policy Knowledge Base & Enquiries RAG")
+                st.write(
+                    f"Authoritative knowledge base for **{CONDO_NAME}** (MCST No. {MCST_NO}). "
+                    f"Used by the Telegram bot and web resident portal to answer common facility and by-law questions."
+                )
+
+                all_kb_cats = get_all_categories()
+                kb_tab_cat = st.selectbox(
+                    "Filter Knowledge Base by Category:",
+                    ["All Categories"] + all_kb_cats,
+                    key="cmms_kb_cat_select",
+                )
+                articles_to_show = (
+                    KNOWLEDGE_BASE
+                    if kb_tab_cat == "All Categories"
+                    else get_articles_by_category(kb_tab_cat)
+                )
+
+                st.write(f"Displaying **{len(articles_to_show)}** policy article(s):")
+                for art in articles_to_show:
+                    with st.expander(f"📄 [{art['article_id']}] {art['category']} — {art['title']}"):
+                        st.markdown(f"**Policy Summary:** {art['summary']}")
+                        st.markdown(f"**Keywords:** {', '.join(f'`{k}`' for k in art['keywords'][:10])}")
+                        st.markdown("**Sample Resident Questions:**")
+                        for q in art.get("questions", [])[:4]:
+                            st.markdown(f"- *\"{q}\"*")
+                        st.markdown("**Full Policy Text & Regulations:**")
+                        st.markdown(art["content"])
 
         with batch_tab:
             st.subheader("Classify requests together")

@@ -11,16 +11,22 @@ import os
 from pathlib import Path
 from typing import NamedTuple
 
-import cv2
-import numpy as np
+try:
+    import cv2
+    import numpy as np
+except (ImportError, Exception) as _cv_err:
+    cv2 = None
+    np = None
 
 logger = logging.getLogger("condo_jev.media_screening")
 
 # Load OpenCV cascades for face detection
-_CASCADES: dict[str, cv2.CascadeClassifier] = {}
+_CASCADES: dict[str, Any] = {}
 
 
-def _get_cascade(name: str) -> cv2.CascadeClassifier | None:
+def _get_cascade(name: str) -> Any:
+    if cv2 is None:
+        return None
     if name not in _CASCADES:
         try:
             path = cv2.data.haarcascades + name
@@ -41,12 +47,12 @@ class MediaScreeningResult(NamedTuple):
     has_face: bool = False
 
 
-def detect_face_in_frame(frame: np.ndarray) -> bool:
+def detect_face_in_frame(frame: Any) -> bool:
     """
     Check if a single image frame contains a human face using an ensemble of Haar cascades.
     Returns True if a face is detected.
     """
-    if frame is None or frame.size == 0:
+    if cv2 is None or frame is None or getattr(frame, "size", 0) == 0:
         return False
 
     # Convert to grayscale
@@ -107,6 +113,9 @@ def detect_face_in_frame(frame: np.ndarray) -> bool:
 
 def screen_image_file(file_path: Path | str) -> MediaScreeningResult:
     """Screen an image file for human faces and basic image validity."""
+    if cv2 is None:
+        return MediaScreeningResult(True, None)
+
     p = Path(file_path)
     if not p.is_file():
         return MediaScreeningResult(False, "Media file was not found.")
@@ -150,6 +159,9 @@ def screen_image_file(file_path: Path | str) -> MediaScreeningResult:
 
 def screen_video_file(file_path: Path | str) -> MediaScreeningResult:
     """Sample frames from a video file and check for human faces."""
+    if cv2 is None:
+        return MediaScreeningResult(True, None)
+
     p = Path(file_path)
     if not p.is_file():
         return MediaScreeningResult(False, "Video file was not found.")

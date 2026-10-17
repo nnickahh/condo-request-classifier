@@ -17,7 +17,7 @@ dependencies = [
     "streamlit>=1.50,<2",
     "typesafe-sdk>=0.7,<1",
     "python-telegram-bot>=21.0,<23",
-    "opencv-python>=4.10,<5",
+    "opencv-python-headless>=4.10,<5",
 ]
 
 [project.optional-dependencies]
