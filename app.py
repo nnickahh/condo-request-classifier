@@ -64,6 +64,7 @@ from condo_jev.condo_enquiries_rag import (
     ESTATE_OFFICE_PHONE,
     GUARDHOUSE_PHONE,
     KNOWLEDGE_BASE,
+    MCST_NO,
     answer_condo_enquiry,
     get_all_categories,
     get_articles_by_category,
