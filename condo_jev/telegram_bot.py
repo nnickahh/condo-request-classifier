@@ -2557,7 +2557,9 @@ def run_interactive_cli() -> None:
 
 
 def main() -> None:
-    load_dotenv()
+    load_dotenv(".env")
+    if not os.getenv("TELEGRAM_BOT_TOKEN"):
+        load_dotenv(".env.example")
     parser = argparse.ArgumentParser(
         description="Condominium Management Agent Telegram Bot.",
     )
@@ -2592,30 +2594,20 @@ def main() -> None:
         run_test_simulation(args.test)
         return
 
-    token = args.token or os.getenv("TELEGRAM_BOT_TOKEN")
-    if not token:
-        print("=" * 60)
-        print("CONDO MANAGEMENT AGENT — TELEGRAM BOT CONFIGURATION")
-        print("=" * 60)
-        print("No TELEGRAM_BOT_TOKEN found in environment or arguments.")
-        print()
-        print("To connect your live Telegram Bot:")
-        print("1. Open Telegram and search for @BotFather.")
-        print("2. Send /newbot and follow instructions to get your API Token.")
-        print("3. Add the token to your .env file:")
-        print("   TELEGRAM_BOT_TOKEN=123456789:ABCdefGhIJKlmNoPQRstuVWXyz")
-        print("4. Optionally set staff chat ID for internal work-order alerts:")
-        print("   TELEGRAM_STAFF_CHAT_ID=-1001234567890")
-        print("5. Start the bot with: python -m condo_jev.telegram_bot")
-        print()
-        print("Running test simulation now to verify agent work order creation:")
-        print("-" * 60)
-        run_test_simulation("Water is leaking from the ceiling in #08-14 into the hallway.")
-        return
+    token = (
+        args.token
+        or os.getenv("TELEGRAM_BOT_TOKEN")
+        or "8846460366:AAFdtbHpsotNqHRuwT_TORvSRlB0JJ0YhcA"
+    )
+    staff_chat = (
+        args.staff_chat
+        or os.getenv("TELEGRAM_STAFF_CHAT_ID")
+        or "-1004358326140"
+    )
 
     bot = CondoManagementTelegramBot(
         token=token,
-        staff_chat_id=args.staff_chat,
+        staff_chat_id=staff_chat,
     )
     bot.run_polling()
 

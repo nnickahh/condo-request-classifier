@@ -13,7 +13,9 @@ from dotenv import load_dotenv
 from condo_jev.telegram_bot import CondoManagementTelegramBot
 from condo_jev.work_order_api import CMMSApiServer
 
-load_dotenv()
+load_dotenv(".env")
+if not os.getenv("TELEGRAM_BOT_TOKEN"):
+    load_dotenv(".env.example")
 
 logging.basicConfig(
     level=logging.INFO,
@@ -25,8 +27,8 @@ logger = logging.getLogger("condo_cloud")
 def main() -> None:
     port = int(os.getenv("PORT", os.getenv("WORK_ORDER_API_PORT", "8000")))
     host = os.getenv("HOST", "0.0.0.0")
-    token = os.getenv("TELEGRAM_BOT_TOKEN")
-    staff_chat = os.getenv("TELEGRAM_STAFF_CHAT_ID")
+    token = os.getenv("TELEGRAM_BOT_TOKEN") or "8846460366:AAFdtbHpsotNqHRuwT_TORvSRlB0JJ0YhcA"
+    staff_chat = os.getenv("TELEGRAM_STAFF_CHAT_ID") or "-1004358326140"
 
     logger.info("=" * 60)
     logger.info(" CONDO JEV 24/7 CLOUD SERVICE & TELEGRAM BOT")
