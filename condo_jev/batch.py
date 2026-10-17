@@ -17,6 +17,7 @@ ALLOWED_CHANNELS = {
     "Phone transcript",
     "Resident App",
     "Intercom / Call Log",
+    "Telegram",
 }
 
 

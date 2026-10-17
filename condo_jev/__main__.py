@@ -46,8 +46,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--channel",
-        choices=["Resident App", "WhatsApp", "Email", "Intercom / Call Log", "Web"],
-        default="Resident App",
+        choices=["Resident App", "Telegram", "WhatsApp", "Email", "Intercom / Call Log", "Web"],
+        default="Telegram",
         help="Input communication channel.",
     )
     parser.add_argument(
@@ -78,7 +78,46 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Run the full benchmark evaluation on data/evaluation.csv and write reports/jev-evaluation-report.json.",
     )
+    parser.add_argument(
+        "--api",
+        action="store_true",
+        help="Launch the CMMS Work Order REST API server.",
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=8000,
+        help="Port for the CMMS REST API server (default: 8000).",
+    )
+    parser.add_argument(
+        "--cmms-stats",
+        action="store_true",
+        help="Display operational CMMS statistics and exit.",
+    )
+    parser.add_argument(
+        "--list-work-orders",
+        action="store_true",
+        help="Display all stored work orders and exit.",
+    )
     args = parser.parse_args(argv)
+
+    if args.api:
+        from condo_jev.work_order_api import CMMSApiServer
+        server = CMMSApiServer(port=args.port)
+        server.serve_forever()
+        return 0
+
+    if args.cmms_stats:
+        from condo_jev.work_order import WorkOrderStore
+        stats = WorkOrderStore().get_cmms_stats()
+        print(json.dumps(stats, indent=2))
+        return 0
+
+    if args.list_work_orders:
+        from condo_jev.work_order import WorkOrderStore
+        orders = WorkOrderStore().list_all(limit=50)
+        print(json.dumps([o.model_dump() for o in orders], indent=2))
+        return 0
 
     backend = build_backend(args.backend, args.model)
     service = JevTriageService(

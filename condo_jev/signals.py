@@ -27,7 +27,7 @@ _EMERGENCY_PATTERNS: list[tuple[re.Pattern[str], Category, str]] = [
     ),
     (
         re.compile(
-            r"\b(smell\s+of\s+gas|gas\s+leak|smoke\s+coming\s+from|fire\s+alarm\s+ringing|flames\s+in|burning\s+smell\s+from\s+(switchboard|panel|riser)|sparks\s+flying|electrical\s+fire)\b",
+            r"\b(smell\s+of\s+gas|gas\s+leak|smoke\s+(and\s+flames\s+)?coming\s+(out\s+)?from|flames\s+(coming|in|seen)|fire\s+alarm\s+ringing|burning\s+smell\s+from\s+(switchboard|panel|riser)|sparks\s+flying|electrical\s+fire)\b",
             re.IGNORECASE,
         ),
         Category.MAINTENANCE,
@@ -35,7 +35,7 @@ _EMERGENCY_PATTERNS: list[tuple[re.Pattern[str], Category, str]] = [
     ),
     (
         re.compile(
-            r"\b(water\s+gushing|burst\s+(water\s+)?(pipe|main)|flooding\s+the\s+(corridor|lobby|lift|unit|basement)|ceiling\s+collapsed)\b",
+            r"\b(water\s+gushing|(?:burst\s+(?:water\s+)?(?:pipe|main)|(?:water\s+)?pipe\s+(?:has\s+)?burst)|flooding\s+(?:the\s+)?(?:corridor|lobby|lift|unit|basement|carpark)|ceiling\s+collapsed)\b",
             re.IGNORECASE,
         ),
         Category.MAINTENANCE,
@@ -81,13 +81,19 @@ _LOCATION_PATTERNS: list[re.Pattern[str]] = [
     re.compile(r"\b(?:Basement|Level|Floor)\s*[B0-9]{1,3}\b", re.IGNORECASE),
     re.compile(r"\b(?:Lift|Elevator)\s*(?:Lobby\s*)?[A-F1-9]\b", re.IGNORECASE),
     re.compile(r"\b(?:BBQ\s*Pit\s*\d?|Function\s*Room\s*[A-Z0-9]?|Tennis\s*Court\s*\d?|Clubhouse|Guardhouse|Main\s*Gate|Side\s*Gate|Bin\s*Centre|Swimming\s*Pool|Gym)\b", re.IGNORECASE),
+    re.compile(r"\b(?:Lot|Carpark\s*Lot|Parking\s*Lot|Bay)\s*[A-Za-z0-9\-]{1,8}\b", re.IGNORECASE),
 ]
 
 _TOPIC_KEYWORD_GROUPS: dict[Category, tuple[str, ...]] = {
-    Category.MAINTENANCE: ("leak", "pipe", "light", "bulb", "lift", "aircon", "air-con", "broken", "faulty", "repair", "water heater", "intercom", "pump", "flickering"),
+    Category.MAINTENANCE: (
+        "leak", "leaking", "pipe", "light", "bulb", "lift", "aircon", "air-con", "broken",
+        "faulty", "repair", "water heater", "intercom", "pump", "flickering", "shower",
+        "shower head", "tap", "faucet", "drain", "choked", "clogged", "flush", "cistern",
+        "toilet bowl", "plumbing", "dripping", "handle", "socket", "power trip", "wiring"
+    ),
     Category.SECURITY: ("access card", "key fob", "guard", "cctv", "tailgat", "suspicious", "stranger", "side gate", "intercom access", "trespass", "security"),
     Category.NOISE: ("loud", "music", "party", "barking", "dog", "noise", "midnight", "drilling", "stomping", "karaoke", "quiet hours", "smoke smell"),
-    Category.CLEANLINESS: ("rubbish", "chute", "bin", "cockroach", "pest", "mosquito", "dirty", "spill", "smelly", "garbage", "rat", "ant", "cleaning"),
+    Category.CLEANLINESS: ("rubbish", "chute", "bin", "cockroach", "pest", "mosquito", "dirty", "spill", "smelly", "garbage", "rat", "ant", "cleaning", "litter", "stain", "trash"),
     Category.FACILITIES: ("book", "reservation", "reserve", "bbq", "function room", "tennis court", "badminton", "gym slot", "clubhouse", "karaoke room"),
     Category.PARKING: ("parking", "carpark", "lot", "iu", "transponder", "wheel clamp", "visitor pass", "barrier", "ev charger", "license plate", "parked in my"),
     Category.BILLING: ("invoice", "giro", "levy", "maintenance fee", "deposit refund", "receipt", "charged twice", "sinking fund", "payment", "statement", "billing"),
@@ -99,6 +105,53 @@ _MULTI_CONNECTORS = re.compile(
     r"\b(also|separately|another\s+thing|by\s+the\s+way|on\s+a\s+separate\s+note|secondly|in\s+addition|plus\s+can\s+you)\b",
     re.IGNORECASE,
 )
+
+_PLUMBING_MAINTENANCE_PATTERNS = re.compile(
+    r"\b(leak|leaking|leaks|pipe|pipes|burst\s+pipe|shower|shower\s+head|shower\s+handle|tap|taps|faucet|faucets|"
+    r"choked\s+drain|clogged\s+drain|drainage|water\s+heater|toilet\s+flush|flush\s+system|cistern|toilet\s+bowl|"
+    r"plumbing|dripping|seepage|water\s+stain\s+ceiling|ceiling\s+leak|air-?con\s+leak|air-?con\s+dripping|"
+    r"broken\s+handle|spoilt\s+lock|door\s+knob\s+loose|broken\s+door|faulty\s+intercom|light\s+flickering|"
+    r"bulb\s+blown|corridor\s+light|lift\s+fault|lift\s+breakdown|power\s+trip|circuit\s+breaker)\b",
+    re.IGNORECASE,
+)
+
+_CLEANLINESS_PATTERNS = re.compile(
+    r"\b(rubbish|garbage|trash|chute\s+smell|chute\s+choked|litter|spill|spilled|dirty|stain|cockroach|cockroaches|"
+    r"rats?|mice|mosquitoes?|ants?|pest|pests|fumigation|fogging|bin\s+overflowing|smelly\s+corridor|dog\s+poop|vomit|"
+    r"did\s+not\s+clean|never\s+clean|not\s+cleaned|clean\s+up|clean\s+the\s+pit|left\s+(it\s+)?dirty|left\s+(it\s+)?uncleaned|"
+    r"uncleaned|mess|messy|greasy|food\s+waste)\b",
+    re.IGNORECASE,
+)
+
+
+def resolve_domain_category_override(text: str, predicted_category: Category) -> Category:
+    """
+    Apply high-priority deterministic domain disambiguation rules.
+    Prevents physical maintenance/plumbing defects (even in swimming pools, restrooms, or common areas)
+    from being misclassified into Cleanliness or General, and ensures uncleaned facilities route to Cleanliness.
+    """
+    clean = text.lower().strip()
+    if not clean:
+        return predicted_category
+
+    has_plumbing_maint = bool(_PLUMBING_MAINTENANCE_PATTERNS.search(clean))
+    has_cleanliness = bool(_CLEANLINESS_PATTERNS.search(clean))
+
+    # If it has a physical leak or fixture defect, it is maintenance
+    if has_plumbing_maint and not has_cleanliness:
+        return Category.MAINTENANCE
+
+    # If it has both (e.g. dirty water from burst pipe or clogged drain spill):
+    # Root issue is plumbing/fixture
+    if has_plumbing_maint and any(term in clean for term in ("leak", "leaking", "pipe", "burst", "shower", "tap", "faucet", "lift", "light")):
+        return Category.MAINTENANCE
+
+    # If it's an uncleaned facility / trash / dirt complaint without plumbing, route to Cleanliness
+    if has_cleanliness and not has_plumbing_maint:
+        if predicted_category in (Category.FACILITIES, Category.GENERAL, Category.OTHER):
+            return Category.CLEANLINESS
+
+    return predicted_category
 
 
 def screen_request_safety(text: str) -> SafetyScreenSignal | None:

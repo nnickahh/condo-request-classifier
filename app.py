@@ -2,6 +2,8 @@ import base64
 import hashlib
 import json
 import os
+import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -9,6 +11,9 @@ import pandas as pd
 import streamlit as st
 from dotenv import load_dotenv
 from pydantic import ValidationError
+import importlib
+
+importlib.invalidate_caches()
 
 from condo_jev.backends import (
     DEFAULT_TRAIN_CSV,
@@ -37,11 +42,32 @@ from condo_jev.taxonomy import (
 )
 import importlib
 import condo_jev.workflow as _workflow_mod
+import condo_jev.work_order as _work_order_mod
 
 if not hasattr(_workflow_mod, "build_follow_up_and_dispatch"):
     importlib.reload(_workflow_mod)
 
+if not hasattr(_work_order_mod.WorkOrderStore, "clear_mock_work_orders"):
+    importlib.reload(_work_order_mod)
+
 from condo_jev.workflow import JevTriageService, build_follow_up_and_dispatch
+from condo_jev.work_order import (
+    ESTATE_TECHNICIANS,
+    WorkOrder,
+    WorkOrderStatus,
+    WorkOrderStore,
+    dispatch_outbound_webhook,
+)
+from condo_jev.condo_enquiries_rag import (
+    CONDO_NAME,
+    ESTATE_OFFICE_HOURS,
+    ESTATE_OFFICE_PHONE,
+    GUARDHOUSE_PHONE,
+    KNOWLEDGE_BASE,
+    answer_condo_enquiry,
+    get_all_categories,
+    get_articles_by_category,
+)
 
 ROOT = Path(__file__).resolve().parent
 load_dotenv(ROOT / ".env")
@@ -398,32 +424,31 @@ def build_comms_cards_html(
 
 
 def ensure_live_ticket_queue(svc: JevTriageService) -> list[dict[str, Any]]:
-    """Initialize in-memory live ticket queue with 4 realistic condo requests if not yet present."""
+    """Initialize in-memory live ticket queue with realistic condo requests and WorkOrderStore."""
     if "live_ticket_queue" not in st.session_state:
-        seed_samples = [
-            ("EST-1041", "Phone transcript", "Block B Lift 2", "My child is trapped in the lift at Block B and the alarm bell is ringing!"),
-            ("EST-1042", "WhatsApp", "#05-12", "The tap in #05-12 is leaking. Also please send my payment receipt."),
-            ("EST-1043", "Email", "#12-08", "I was charged twice on GIRO for my Q3 maintenance levy; please check my invoice."),
-            ("EST-1044", "Resident App", "#14-08", "The kitchen sink pipe in #14-08 is leaking water onto the cabinet floor."),
-        ]
+        store = WorkOrderStore()
+        orders = store.list_all()
+
         queue_items: list[dict[str, Any]] = []
-        for t_id, chan, loc, txt in seed_samples:
-            r_obj = ResidentRequest(text=txt, channel=chan, location=loc or None)  # type: ignore[arg-type]
-            dec = svc.classify(r_obj)
+        for wo in orders:
+            admin_status = (
+                wo.status
+                if "Approved" in wo.status
+                else ("Pending Admin Review" if wo.needs_human_review else "Auto-Dispatched")
+            )
             queue_items.append(
                 {
-                    "ticket_id": t_id,
-                    "channel": chan,
-                    "location": dec.extracted_location or loc or "Not provided",
-                    "text": txt,
-                    "category_title": dec.category_title,
-                    "assigned_team": dec.assigned_team,
-                    "priority": dec.priority.value,
-                    "confidence": dec.choice_confidence,
-                    "needs_review": dec.needs_human_review,
-                    "admin_status": "Pending Admin Review"
-                    if dec.needs_human_review
-                    else "Auto-Dispatched",
+                    "ticket_id": wo.ticket_id,
+                    "work_order_id": wo.work_order_id,
+                    "channel": wo.channel,
+                    "location": wo.location or "Not provided",
+                    "text": wo.text,
+                    "category_title": wo.category_title,
+                    "assigned_team": wo.assigned_team,
+                    "priority": wo.priority.value,
+                    "confidence": wo.choice_confidence,
+                    "needs_review": wo.needs_human_review,
+                    "admin_status": admin_status,
                 }
             )
         st.session_state["live_ticket_queue"] = queue_items
@@ -435,31 +460,34 @@ def upsert_ticket_in_queue(
     decision: Classification,
     svc: JevTriageService,
 ) -> str:
-    """Insert or find a ticket in the live queue and return its Ticket ID."""
+    """Insert or find a ticket in the live queue and persistent WorkOrderStore."""
+    store = WorkOrderStore()
     queue = ensure_live_ticket_queue(svc)
     for item in queue:
         if item["text"].strip() == req.text.strip():
             return str(item["ticket_id"])
-    next_num = 1041 + len(queue)
-    new_id = f"EST-{next_num}"
-    queue.insert(
-        0,
-        {
-            "ticket_id": new_id,
-            "channel": req.channel,
-            "location": decision.extracted_location or req.location or "Not provided",
-            "text": req.text,
-            "category_title": decision.category_title,
-            "assigned_team": decision.assigned_team,
-            "priority": decision.priority.value,
-            "confidence": decision.choice_confidence,
-            "needs_review": decision.needs_human_review,
-            "admin_status": "Pending Admin Review"
-            if decision.needs_human_review
-            else "Auto-Dispatched",
-        },
+    wo = store.create_work_order(
+        request=req,
+        classification=decision,
+        resident_id="portal_user",
+        resident_name="Web Resident",
     )
-    return new_id
+    new_item = {
+        "ticket_id": wo.ticket_id,
+        "work_order_id": wo.work_order_id,
+        "channel": req.channel,
+        "location": wo.location or "Not provided",
+        "text": req.text,
+        "category_title": wo.category_title,
+        "assigned_team": wo.assigned_team,
+        "priority": wo.priority.value,
+        "confidence": wo.choice_confidence,
+        "needs_review": wo.needs_human_review,
+        "admin_status": wo.status,
+    }
+    queue.insert(0, new_item)
+    st.session_state["live_ticket_queue"] = queue
+    return wo.ticket_id
 
 
 def main() -> None:
@@ -530,11 +558,11 @@ def main() -> None:
                 "✓ 100% free & offline · Platt-calibrated on 160 condo requests. No API key or external credits required."
             )
         st.divider()
-        st.markdown("**Current scope**")
-        st.caption("Choice · Score · 4 Nouls · Human Review")
-        st.caption(
-            "Staff review is the focus of this prototype. Operational integrations are future work."
-        )
+        has_tg_token = bool(os.getenv("TELEGRAM_BOT_TOKEN"))
+        tg_status = "Linked & Configured 🟢" if has_tg_token else "Ready (Offline / Simulated) 🟡"
+        st.markdown("**Telegram Bot Agent**")
+        st.caption(f"Status: {tg_status}")
+        st.caption("Intake: Telegram ➔ Jev Triage ➔ Work Order Dispatch")
 
     bg_filename = "condo-bg-editorial.jpg"
     bg_file = ROOT / "output/hero" / bg_filename
@@ -1443,8 +1471,9 @@ def main() -> None:
         st.session_state.pop("compare_result", None)
 
     with st.container(key="tablet_panel"):
-        single_tab, batch_tab, evaluation_tab, guide_tab, showcase_tab = st.tabs(
+        cmms_tab, single_tab, batch_tab, evaluation_tab, guide_tab, showcase_tab = st.tabs(
             [
+                "🛠️ Operations Dashboard & Review Desk",
                 "Classify a request",
                 "Batch review",
                 "Evaluation",
@@ -1520,9 +1549,9 @@ def main() -> None:
                         channel = st.selectbox(
                             "Channel",
                             [
+                                "Telegram",
                                 "Resident App",
                                 "Web",
-                                "WhatsApp",
                                 "Email",
                                 "Phone transcript",
                                 "Intercom / Call Log",
@@ -1935,27 +1964,45 @@ def main() -> None:
                         )
                     with q_col4:
                         st.markdown("<div style='height: 1.65rem;'></div>", unsafe_allow_html=True)
-                        if st.button(
-                            "✓ Approve & Dispatch",
-                            type="primary",
-                            width="stretch",
-                            key="admin_approve_btn",
-                        ):
-                            matched_spec = next(
-                                (
-                                    spec
-                                    for spec in TAXONOMY.values()
-                                    if spec.title == override_cat_title
-                                ),
-                                None,
-                            )
-                            selected_item["category_title"] = override_cat_title
-                            if matched_spec is not None:
-                                selected_item["assigned_team"] = matched_spec.team
-                            selected_item["priority"] = override_prio.lower()
-                            selected_item["needs_review"] = False
-                            selected_item["admin_status"] = "✓ Staff Approved & Dispatched"
-                            st.rerun()
+                        q_b1, q_b2 = st.columns([1.3, 0.9])
+                        with q_b1:
+                            if st.button(
+                                "✓ Approve & Dispatch",
+                                type="primary",
+                                width="stretch",
+                                key="admin_approve_btn",
+                            ):
+                                matched_spec = next(
+                                    (
+                                        spec
+                                        for spec in TAXONOMY.values()
+                                        if spec.title == override_cat_title
+                                    ),
+                                    None,
+                                )
+                                selected_item["category_title"] = override_cat_title
+                                if matched_spec is not None:
+                                    selected_item["assigned_team"] = matched_spec.team
+                                selected_item["priority"] = override_prio.lower()
+                                selected_item["admin_status"] = "✓ Staff Approved & Dispatched"
+                                WorkOrderStore().update_status(
+                                    selected_tid,
+                                    "Staff Approved & Dispatched",
+                                    note=f"Assigned to {selected_item['assigned_team']} with priority {override_prio.upper()}",
+                                )
+                                st.rerun()
+                        with q_b2:
+                            if st.button(
+                                "🗑️ Delete",
+                                type="secondary",
+                                width="stretch",
+                                key="admin_del_ticket_btn",
+                            ):
+                                WorkOrderStore().delete_work_order(selected_tid)
+                                queue_items = [it for it in queue_items if it["ticket_id"] != selected_tid]
+                                st.session_state["live_ticket_queue"] = queue_items
+                                st.toast(f"Ticket {selected_tid} deleted.")
+                                st.rerun()
 
             with wb_tab5:
                 st.caption("Classified resident message:")
@@ -1967,6 +2014,660 @@ def main() -> None:
                     "classification.json",
                     "application/json",
                 )
+
+        with cmms_tab:
+            st.markdown(
+                '<div class="hero-topbar">'
+                '<div class="hero-topbar-title">🛠️ Work Order Management System (CMMS)</div>'
+                '<div class="hero-engine-pill">✦ Operations & Dispatch Engine</div>'
+                '</div>',
+                unsafe_allow_html=True,
+            )
+            st.markdown(
+                "Unified estate operations console connecting **Telegram resident intake**, "
+                "**Jev System-One automatic triage**, **technician dispatch & field work tracking**, "
+                "and **outbound REST API & webhooks**."
+            )
+
+            cmms_store = WorkOrderStore()
+            stats = cmms_store.get_cmms_stats()
+
+            tg_token = os.getenv("TELEGRAM_BOT_TOKEN")
+            tg_staff = os.getenv("TELEGRAM_STAFF_CHAT_ID")
+            has_tg = bool(tg_token)
+            st.markdown(
+                f'<div style="background:rgba(56,189,248,0.08); border:1px solid rgba(56,189,248,0.25); border-radius:8px; padding:10px 16px; margin-bottom:14px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">'
+                f'<div>🤖 <span style="font-weight:700; color:#38bdf8;">Telegram Resident Concierge Bot:</span> '
+                f'<span style="color:#e2e8f0;">@condo_request_classifier_bot</span> '
+                f'<span style="background:rgba(34,197,94,0.2); color:#4ade80; border:1px solid #22c55e; padding:1px 6px; border-radius:4px; font-size:0.75rem; font-weight:700; margin-left:6px;">LIVE 24/7 TWO-WAY SYNC</span></div>'
+                f'<div style="font-size:0.85rem; color:#94a3b8;">Staff Channel: <code style="color:#cbd5e1;">{tg_staff or "Auto-routed to active sessions"}</code></div>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+
+            # KPI Grid
+            st.markdown(
+                build_kpi_grid_html(
+                    [
+                        ("Total Work Orders", f"{stats['total_work_orders']}", "All logged tickets"),
+                        ("Active / Open", f"{stats['open_work_orders']}", "Pending or in progress"),
+                        ("Assigned to Tech", f"{stats['assigned']}", "Technician dispatched"),
+                        ("Staff Review Req.", f"{stats['pending_review']}", "Flagged by Jev / Policy"),
+                        ("Resolved / Closed", f"{stats['resolved']}", "Sign-off & completed"),
+                        ("Emergency Alerts", f"{stats['emergency']}", "High-hazard escalations"),
+                    ]
+                ),
+                unsafe_allow_html=True,
+            )
+            st.markdown("<div style='height: 1rem;'></div>", unsafe_allow_html=True)
+
+            cmms_sub1, cmms_sub2, cmms_sub3, cmms_sub4 = st.tabs(
+                [
+                    "📋 Live Work Orders & Dispatch",
+                    "👷 Technician & Vendor Roster",
+                    "🔌 REST API & Webhooks",
+                    "📊 CMMS Analytics",
+                ]
+            )
+
+            with cmms_sub1:
+                all_orders = cmms_store.list_all(limit=200)
+
+                # Header with Live Refresh and Review Toggle
+                top_c1, top_c2, top_c3 = st.columns([3.0, 1.0, 1.0])
+                with top_c1:
+                    q_rev_count = sum(
+                        1 for o in all_orders
+                        if o.needs_human_review
+                        or o.status in (
+                            WorkOrderStatus.PENDING_REVIEW.value,
+                            WorkOrderStatus.EMERGENCY_ESCALATION.value,
+                            WorkOrderStatus.AUTO_DISPATCHED.value,
+                        )
+                        or not o.assigned_technician
+                    )
+                    review_filter_active = st.toggle(
+                        f"⚠️ **Staff Action Queue:** Filter to tickets requiring review / assignment ({q_rev_count})",
+                        value=False,
+                        key="cmms_review_filter_toggle",
+                    )
+                with top_c2:
+                    if st.button("🔄 Refresh Live Requests", width="stretch", key="cmms_refresh_btn"):
+                        st.session_state.pop("live_ticket_queue", None)
+                        st.rerun()
+                with top_c3:
+                    if st.button("🧹 Clear Mock Tickets", width="stretch", key="cmms_clear_mock_btn", help="Purge any mock/simulated tickets and retain only genuine Telegram resident requests."):
+                        purged = cmms_store.clear_mock_work_orders()
+                        st.session_state.pop("live_ticket_queue", None)
+                        st.toast(f"Purged {purged} mock tickets. Showing only Telegram resident requests.")
+                        st.rerun()
+
+                # Filter Controls
+                f_col1, f_col2, f_col3, f_col4 = st.columns([1.8, 1.2, 1.2, 1.2])
+                with f_col1:
+                    cmms_search = st.text_input(
+                        "Search Work Orders",
+                        placeholder="Search ticket #, unit, resident, or keywords...",
+                        key="cmms_search_input",
+                    )
+                with f_col2:
+                    status_choices = ["All"] + [s.value for s in WorkOrderStatus]
+                    cmms_status_filter = st.selectbox(
+                        "Filter by Status",
+                        options=status_choices,
+                        index=0,
+                        key="cmms_status_filter_sel",
+                    )
+                with f_col3:
+                    cat_choices = ["All"] + [spec.title for spec in TAXONOMY.values()]
+                    cmms_cat_filter = st.selectbox(
+                        "Filter by Department",
+                        options=cat_choices,
+                        index=0,
+                        key="cmms_cat_filter_sel",
+                    )
+                with f_col4:
+                    prio_choices = ["All", "LOW", "NORMAL", "HIGH", "EMERGENCY"]
+                    cmms_prio_filter = st.selectbox(
+                        "Filter by Priority",
+                        options=prio_choices,
+                        index=0,
+                        key="cmms_prio_filter_sel",
+                    )
+
+                # Filter logic
+                filtered_orders = all_orders
+                if review_filter_active:
+                    filtered_orders = [
+                        o for o in filtered_orders
+                        if o.needs_human_review
+                        or o.status in (
+                            WorkOrderStatus.PENDING_REVIEW.value,
+                            WorkOrderStatus.EMERGENCY_ESCALATION.value,
+                            WorkOrderStatus.AUTO_DISPATCHED.value,
+                        )
+                        or not o.assigned_technician
+                    ]
+                if cmms_search.strip():
+                    q = cmms_search.strip().lower()
+                    filtered_orders = [
+                        o for o in filtered_orders
+                        if q in o.work_order_id.lower()
+                        or q in o.ticket_id.lower()
+                        or q in o.display_block.lower()
+                        or q in o.display_level.lower()
+                        or q in o.display_unit.lower()
+                        or q in o.display_reason.lower()
+                        or (o.location and q in o.location.lower())
+                        or (o.resident_name and q in o.resident_name.lower())
+                        or (o.resident_username and q in o.resident_username.lower())
+                        or q in o.text.lower()
+                        or (o.assigned_technician and q in o.assigned_technician.lower())
+                    ]
+                if cmms_status_filter != "All":
+                    filtered_orders = [o for o in filtered_orders if o.status == cmms_status_filter]
+                if cmms_cat_filter != "All":
+                    filtered_orders = [o for o in filtered_orders if o.category_title == cmms_cat_filter]
+                if cmms_prio_filter != "All":
+                    filtered_orders = [o for o in filtered_orders if str(o.priority.value).upper() == cmms_prio_filter]
+
+                st.caption(f"Showing {len(filtered_orders)} of {len(all_orders)} total work orders")
+
+                if filtered_orders:
+                    table_rows = []
+                    for o in filtered_orders:
+                        table_rows.append({
+                            "Work Order": o.work_order_id,
+                            "Block": o.display_block,
+                            "Level": o.display_level,
+                            "Unit": o.display_unit,
+                            "Reason / Issue": o.display_reason,
+                            "Department": o.category_title,
+                            "Priority": str(o.priority.value).upper(),
+                            "SLA Target": o.sla_target,
+                            "Status": o.status,
+                            "Assigned Tech": o.assigned_technician or "— Unassigned —",
+                            "Channel": o.channel,
+                            "Resident": o.resident_name or (f"@{o.resident_username}" if o.resident_username else o.resident_id),
+                            "Logged At": o.created_at[:16].replace("T", " "),
+                        })
+                    cmms_df = pd.DataFrame(table_rows)
+                    st.dataframe(cmms_df, width="stretch", hide_index=True)
+
+                    with st.expander("🗑️ Admin Batch Management — Delete Work Orders", expanded=False):
+                        st.caption("Select one or more work orders to permanently remove from the database.")
+                        del_options = [
+                            f"{o.work_order_id} — {o.display_block} {o.display_unit} ({o.resident_name or o.resident_id}): {o.display_reason[:45]}"
+                            for o in filtered_orders
+                        ]
+                        sel_batch = st.multiselect(
+                            "Select work orders to delete:",
+                            options=del_options,
+                            key="cmms_batch_del_multisel",
+                        )
+                        if sel_batch:
+                            b_c1, b_c2 = st.columns([3, 1])
+                            with b_c1:
+                                batch_confirm = st.checkbox(
+                                    f"I confirm permanent deletion of {len(sel_batch)} selected work order(s)",
+                                    key="cmms_batch_del_confirm_box",
+                                )
+                            with b_c2:
+                                if st.button(
+                                    "🗑️ Delete Selected",
+                                    type="primary",
+                                    disabled=not batch_confirm,
+                                    width="stretch",
+                                    key="cmms_btn_batch_delete_run",
+                                ):
+                                    target_ids = [item.split(" — ")[0].strip() for item in sel_batch]
+                                    count = cmms_store.bulk_delete_work_orders(target_ids)
+                                    st.session_state.pop("live_ticket_queue", None)
+                                    st.toast(f"Successfully deleted {count} work order(s).")
+                                    st.rerun()
+                else:
+                    st.info("No work orders matched your search and filter criteria.")
+
+                # Detail & Dispatch Operations Dossier
+                if filtered_orders:
+                    st.markdown("#### 🛠️ Work Order Operations & Dispatch Desk")
+                    order_map = {
+                        f"{o.work_order_id} — {o.display_block} {o.display_unit} ({o.category_title} · {o.priority.value.upper()}) [Status: {o.status}]": o
+                        for o in filtered_orders
+                    }
+                    selected_key = st.selectbox(
+                        "Select Work Order to Inspect or Dispatch:",
+                        options=list(order_map.keys()),
+                        index=0,
+                        key="cmms_selected_order_key",
+                    )
+                    sel_wo = order_map[selected_key]
+
+                    with st.container(border=True):
+                        d_col1, d_col2 = st.columns([1.3, 1.0], gap="large")
+
+                        with d_col1:
+                            st.markdown(f"### `{sel_wo.work_order_id}` ({sel_wo.ticket_id})")
+                            prio_color = {
+                                Priority.EMERGENCY: "#ef4444",
+                                Priority.HIGH: "#f97316",
+                                Priority.NORMAL: "#38bdf8",
+                                Priority.LOW: "#94a3b8",
+                            }.get(sel_wo.priority, "#38bdf8")
+
+                            st.markdown(
+                                f'<div style="display:flex;gap:10px;margin-bottom:12px;flex-wrap:wrap;">'
+                                f'<span style="background:{prio_color}22;color:{prio_color};border:1px solid {prio_color};padding:2px 8px;border-radius:4px;font-weight:700;font-size:0.85rem;">Priority: {sel_wo.priority.value.upper()}</span>'
+                                f'<span style="background:#334155;color:#e2e8f0;padding:2px 8px;border-radius:4px;font-size:0.85rem;">Status: <b>{sel_wo.status}</b></span>'
+                                f'<span style="background:#1e293b;color:#94a3b8;border:1px solid #475569;padding:2px 8px;border-radius:4px;font-size:0.85rem;">Channel: {sel_wo.channel}</span>'
+                                f'<span style="background:#1e293b;color:#94a3b8;border:1px solid #475569;padding:2px 8px;border-radius:4px;font-size:0.85rem;">SLA: {sel_wo.sla_target}</span>'
+                                f'</div>',
+                                unsafe_allow_html=True,
+                            )
+
+                            st.markdown(f"**Resident Issue Report:**")
+                            st.info(f"_{sel_wo.text}_")
+
+                            # Resident Evidence Photo (if attached)
+                            if getattr(sel_wo, "photo_path", None) and os.path.exists(sel_wo.photo_path):
+                                st.image(sel_wo.photo_path, caption=f"📷 Resident Evidence Photo ({Path(sel_wo.photo_path).name})", use_container_width=True)
+
+                            # Reopen Alert Banner (if reopened by resident)
+                            if getattr(sel_wo, "reopened_count", 0) > 0:
+                                st.error(f"⚠️ **PRIORITY REOPEN ALERT:** This work order was reopened {sel_wo.reopened_count} time(s) by the resident.")
+
+                            st.markdown(
+                                f'<div style="background:#0f172a;border:1px solid #334155;border-radius:6px;padding:10px 14px;margin-bottom:12px;">'
+                                f'<div style="font-size:0.78rem;color:#94a3b8;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:6px;"><b>Categorized Estate Coordinates</b></div>'
+                                f'<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">'
+                                f'<span style="background:#1e293b;border:1px solid #0284c7;color:#38bdf8;padding:3px 10px;border-radius:4px;font-weight:600;font-size:0.85rem;">🏢 Block: <b>{sel_wo.display_block}</b></span>'
+                                f'<span style="background:#1e293b;border:1px solid #0284c7;color:#38bdf8;padding:3px 10px;border-radius:4px;font-weight:600;font-size:0.85rem;">📶 Level: <b>{sel_wo.display_level}</b></span>'
+                                f'<span style="background:#1e293b;border:1px solid #0284c7;color:#38bdf8;padding:3px 10px;border-radius:4px;font-weight:600;font-size:0.85rem;">🚪 Unit: <b>{sel_wo.display_unit}</b></span>'
+                                f'</div>'
+                                f'<div style="margin-top:8px;font-size:0.88rem;color:#e2e8f0;"><b>Reported Reason / Issue:</b> {sel_wo.display_reason}</div>'
+                                f'</div>',
+                                unsafe_allow_html=True,
+                            )
+                            loc_str = sel_wo.location or "Pending resident confirmation"
+                            res_name = sel_wo.resident_name or (f"@{sel_wo.resident_username}" if sel_wo.resident_username else sel_wo.resident_id)
+                            st.markdown(f"**Reported by:** `{res_name}` (`{sel_wo.resident_id}`) · **Raw Location:** `{loc_str}`")
+
+                            # Jev Diagnostics
+                            with st.expander("🔬 Jev AI Triage Diagnostics", expanded=False):
+                                st.write(f"• **Predicted Department:** {sel_wo.category_title} ({sel_wo.category})")
+                                st.write(f"• **Choice Confidence:** {sel_wo.choice_confidence:.1%}")
+                                st.write(f"• **Urgency Score:** {sel_wo.urgency_score:.0%}")
+                                st.write(f"• **Requires Review:** {'YES' if sel_wo.needs_human_review else 'NO'}")
+                                if sel_wo.review_reasons:
+                                    st.write(f"• **Review Reasons:** {', '.join(sel_wo.review_reasons)}")
+                                if sel_wo.evidence_quotes:
+                                    st.write(f"• **Evidence Quotes:** {', '.join(sel_wo.evidence_quotes)}")
+
+                            # Resolution details & Resident Feedback (if completed)
+                            if sel_wo.resolution_summary:
+                                st.success(f"**Resolution Summary:** {sel_wo.resolution_summary}")
+                                if sel_wo.labor_hours or sel_wo.cost_sgd or sel_wo.parts_or_materials:
+                                    parts_disp = ', '.join(sel_wo.parts_or_materials) if sel_wo.parts_or_materials else 'None'
+                                    cost_disp = f"${sel_wo.cost_sgd:.2f}" if sel_wo.cost_sgd is not None else 'N/A'
+                                    labor_disp = f"{sel_wo.labor_hours}h" if sel_wo.labor_hours is not None else 'N/A'
+                                    st.caption(f"Labor: {labor_disp} · Cost: {cost_disp} · Parts: {parts_disp}")
+
+                            if getattr(sel_wo, "resident_feedback_rating", None):
+                                stars = "⭐" * sel_wo.resident_feedback_rating
+                                comment_str = f" — \"{sel_wo.resident_feedback_comment}\"" if getattr(sel_wo, "resident_feedback_comment", None) else ""
+                                st.success(f"**Resident Rating:** {stars} ({sel_wo.resident_feedback_rating}/5){comment_str}")
+
+                            # Notes & History
+                            st.markdown("**📌 Activity & Audit Trail:**")
+                            if sel_wo.notes:
+                                for note_item in sel_wo.notes:
+                                    st.caption(f"• {note_item}")
+                            else:
+                                st.caption("No notes recorded yet.")
+
+                            # Add Note Form
+                            note_text = st.text_input("Add Internal Note / Follow-up:", key=f"note_input_{sel_wo.work_order_id}")
+                            if st.button("Add Note", key=f"btn_add_note_{sel_wo.work_order_id}"):
+                                if note_text.strip():
+                                    cmms_store.update_status(sel_wo.work_order_id, sel_wo.status, note=note_text.strip(), notify_resident=False)
+                                    st.rerun()
+
+                        with d_col2:
+                            st.markdown("#### ⚡ Technician & Dispatch Actions")
+
+                            # 1. Assign Technician
+                            with st.container(border=True):
+                                st.markdown("**1. Assign Duty Technician / Contractor**")
+                                dept_techs = [
+                                    t for t in ESTATE_TECHNICIANS
+                                    if sel_wo.category_title.lower() in t["department"].lower()
+                                    or sel_wo.assigned_team.lower() in t["department"].lower()
+                                ]
+                                if not dept_techs:
+                                    dept_techs = ESTATE_TECHNICIANS
+
+                                tech_options = [f"{t['name']} ({t['role']} — {t['vendor']})" for t in dept_techs] + ["Custom Contractor / Other"]
+                                cur_tech_idx = 0
+                                if sel_wo.assigned_technician:
+                                    for idx, t_str in enumerate(tech_options):
+                                        if sel_wo.assigned_technician in t_str:
+                                            cur_tech_idx = idx
+                                            break
+
+                                selected_tech_opt = st.selectbox(
+                                    "Select Technician:",
+                                    options=tech_options,
+                                    index=cur_tech_idx,
+                                    key=f"tech_sel_{sel_wo.work_order_id}",
+                                )
+
+                                custom_tech_name = ""
+                                custom_tech_phone = ""
+                                if "Custom" in selected_tech_opt:
+                                    custom_tech_name = st.text_input("Contractor / Tech Name:", key=f"custom_name_{sel_wo.work_order_id}")
+                                    custom_tech_phone = st.text_input("Contact Phone:", key=f"custom_phone_{sel_wo.work_order_id}")
+
+                                dispatch_note = st.text_input("Dispatch Instructions (optional):", placeholder="e.g. Bring replacement 18W LED driver", key=f"disp_note_{sel_wo.work_order_id}")
+
+                                notify_tg_assign = st.checkbox("📱 Push notification to resident via Telegram", value=(sel_wo.channel == "Telegram"), key=f"tg_notify_assign_{sel_wo.work_order_id}")
+
+                                if st.button("👷 Assign & Dispatch", type="primary", use_container_width=True, key=f"btn_assign_{sel_wo.work_order_id}"):
+                                    if "Custom" in selected_tech_opt:
+                                        t_name = custom_tech_name.strip() or "Custom Contractor"
+                                        t_phone = custom_tech_phone.strip()
+                                        t_vendor = "Contractor"
+                                    else:
+                                        matched_t = next((t for t in dept_techs if t["name"] in selected_tech_opt), dept_techs[0])
+                                        t_name = matched_t["name"]
+                                        t_phone = matched_t["phone"]
+                                        t_vendor = matched_t["vendor"]
+
+                                    cmms_store.assign_technician(
+                                        sel_wo.work_order_id,
+                                        technician_name=t_name,
+                                        phone=t_phone,
+                                        vendor=t_vendor,
+                                        note=dispatch_note.strip() or None,
+                                        notify_resident=notify_tg_assign,
+                                    )
+                                    st.success(f"Assigned {t_name} to Work Order {sel_wo.work_order_id}!")
+                                    st.rerun()
+
+                            # 2. Advance Status
+                            with st.container(border=True):
+                                st.markdown("**2. Operational Status Progression**")
+                                notify_tg_status = st.checkbox("📱 Push status update to resident via Telegram", value=(sel_wo.channel == "Telegram"), key=f"tg_notify_status_{sel_wo.work_order_id}")
+                                s_col1, s_col2 = st.columns(2)
+                                with s_col1:
+                                    if st.button("▶ In Progress", use_container_width=True, key=f"btn_prog_{sel_wo.work_order_id}"):
+                                        cmms_store.update_status(
+                                            sel_wo.work_order_id,
+                                            WorkOrderStatus.IN_PROGRESS.value,
+                                            note="Technician arrived on site and commenced work.",
+                                            notify_resident=notify_tg_status,
+                                        )
+                                        st.rerun()
+                                with s_col2:
+                                    if st.button("⏸ Pending Parts", use_container_width=True, key=f"btn_parts_{sel_wo.work_order_id}"):
+                                        cmms_store.update_status(
+                                            sel_wo.work_order_id,
+                                            WorkOrderStatus.PENDING_PARTS.value,
+                                            note="Work paused: awaiting replacement parts or resident access.",
+                                            notify_resident=notify_tg_status,
+                                        )
+                                        st.rerun()
+
+                            # 3. Resolve Work Order
+                            with st.expander("✓ Mark Work Order Resolved", expanded=sel_wo.status == WorkOrderStatus.IN_PROGRESS.value):
+                                res_input = st.text_area("Resolution Summary:", placeholder="Describe the repairs made or actions taken...", key=f"res_txt_{sel_wo.work_order_id}")
+                                r_c1, r_c2 = st.columns(2)
+                                with r_c1:
+                                    res_labor = st.number_input("Labor Hours:", min_value=0.0, max_value=40.0, value=1.0, step=0.5, key=f"res_labor_{sel_wo.work_order_id}")
+                                with r_c2:
+                                    res_cost = st.number_input("Cost (SGD $):", min_value=0.0, max_value=5000.0, value=0.0, step=5.0, key=f"res_cost_{sel_wo.work_order_id}")
+                                res_parts_txt = st.text_input("Parts / Materials Replaced:", placeholder="e.g. Ballast, LED Tube, O-ring", key=f"res_parts_{sel_wo.work_order_id}")
+
+                                notify_tg_res = st.checkbox("📱 Send resolution notice & verification buttons to resident on Telegram", value=(sel_wo.channel == "Telegram"), key=f"tg_notify_res_{sel_wo.work_order_id}")
+
+                                if st.button("✓ Sign-off & Mark Resolved", type="primary", use_container_width=True, key=f"btn_resolve_{sel_wo.work_order_id}"):
+                                    if not res_input.strip():
+                                        st.warning("Please provide a brief resolution summary.")
+                                    else:
+                                        parts_list = [p.strip() for p in res_parts_txt.split(",") if p.strip()]
+                                        cmms_store.resolve_work_order(
+                                            sel_wo.work_order_id,
+                                            resolution_summary=res_input.strip(),
+                                            labor_hours=res_labor if res_labor > 0 else None,
+                                            cost_sgd=res_cost if res_cost > 0 else None,
+                                            parts=parts_list,
+                                            notify_resident=notify_tg_res,
+                                        )
+                                        st.success(f"Work Order {sel_wo.work_order_id} marked as Resolved!")
+                                        st.rerun()
+
+                            # 4. Close & Archive
+                            if sel_wo.status in (WorkOrderStatus.RESOLVED.value, "Resolved"):
+                                if st.button("🔒 Manager Close & Archive", use_container_width=True, key=f"btn_close_{sel_wo.work_order_id}"):
+                                    cmms_store.close_work_order(sel_wo.work_order_id, note="Manager confirmed completion and closed ticket.", notify_resident=True)
+                                    st.success("Ticket closed and archived.")
+                                    st.rerun()
+
+                            # 5. Direct Telegram Concierge Messaging
+                            if sel_wo.channel == "Telegram" or getattr(sel_wo, "resident_chat_id", None) or (sel_wo.resident_id and sel_wo.resident_id.isdigit()):
+                                with st.container(border=True):
+                                    st.markdown("**💬 Direct Telegram Concierge Message**")
+                                    st.caption(f"Send a direct update to {res_name} via Telegram")
+                                    quick_presets = [
+                                        "Choose a template...",
+                                        "Our duty technician is currently outside your unit door.",
+                                        "Technician requires access to the utility riser inside your unit.",
+                                        "Replacement parts have been ordered; inspection scheduled tomorrow.",
+                                        "Please call the management office at 6789 0125 at your earliest convenience.",
+                                    ]
+                                    preset_sel = st.selectbox("Quick Template:", options=quick_presets, key=f"preset_sel_{sel_wo.work_order_id}")
+                                    default_val = "" if preset_sel == quick_presets[0] else preset_sel
+                                    direct_msg = st.text_area("Message to Resident:", value=default_val, key=f"direct_msg_{sel_wo.work_order_id}")
+                                    if st.button("📤 Send Telegram Message", width="stretch", key=f"btn_send_tg_{sel_wo.work_order_id}"):
+                                        if direct_msg.strip():
+                                            res = cmms_store.send_resident_message(sel_wo.work_order_id, direct_msg.strip())
+                                            if res.get("success"):
+                                                st.success("Message dispatched to resident on Telegram!")
+                                                st.rerun()
+                                            else:
+                                                st.error(f"Failed to send: {res.get('error')}")
+
+                            # 6. Admin Delete Work Order
+                            with st.container(border=True):
+                                st.markdown("**🗑️ Admin Actions — Delete Work Order**")
+                                st.caption("Permanently delete this work order and remove it from the estate registry.")
+                                del_confirm = st.checkbox(
+                                    f"I confirm permanent deletion of `{sel_wo.work_order_id}`",
+                                    key=f"del_confirm_{sel_wo.work_order_id}",
+                                )
+                                if st.button(
+                                    "🗑️ Permanently Delete Work Order",
+                                    type="secondary",
+                                    width="stretch",
+                                    disabled=not del_confirm,
+                                    key=f"btn_del_{sel_wo.work_order_id}",
+                                ):
+                                    cmms_store.delete_work_order(sel_wo.work_order_id)
+                                    st.session_state.pop("live_ticket_queue", None)
+                                    st.toast(f"Work Order {sel_wo.work_order_id} has been permanently deleted.")
+                                    st.rerun()
+
+
+            with cmms_sub2:
+                st.subheader("Estate Technicians & Specialized Contractor Roster")
+                st.write(
+                    "Standard maintenance technicians, security teams, and vendor contacts "
+                    "configured for automated or manual dispatch."
+                )
+                tech_df = pd.DataFrame(ESTATE_TECHNICIANS).rename(
+                    columns={
+                        "id": "Technician ID",
+                        "name": "Full Name",
+                        "department": "Primary Department",
+                        "role": "Job Role / Specialty",
+                        "phone": "Emergency Hotline / Intercom",
+                        "vendor": "Company / Contractor",
+                        "available": "Available",
+                    }
+                )
+                st.dataframe(tech_df, use_container_width=True, hide_index=True)
+
+                st.markdown("<div style='height: 1rem;'></div>", unsafe_allow_html=True)
+                st.markdown("#### 🚨 24/7 Priority Emergency Escalation Desks")
+                em_col1, em_col2, em_col3 = st.columns(3)
+                with em_col1:
+                    st.markdown(
+                        '<div style="background:#1e293b;border:1px solid #334155;border-radius:8px;padding:15px;">'
+                        '<div style="color:#ef4444;font-weight:700;">🛗 Lift Trapped Passenger Desk</div>'
+                        '<div style="font-size:1.2rem;font-weight:600;margin:6px 0;">+65 6789 0124</div>'
+                        '<div style="font-size:0.85rem;color:#94a3b8;">Otis Elevator 24/7 Rapid Response</div>'
+                        '</div>',
+                        unsafe_allow_html=True,
+                    )
+                with em_col2:
+                    st.markdown(
+                        '<div style="background:#1e293b;border:1px solid #334155;border-radius:8px;padding:15px;">'
+                        '<div style="color:#38bdf8;font-weight:700;">🛡️ 24/7 Guardhouse Intercom</div>'
+                        '<div style="font-size:1.2rem;font-weight:600;margin:6px 0;">+65 6789 0123</div>'
+                        '<div style="font-size:0.85rem;color:#94a3b8;">On-site Certis CISCO Security</div>'
+                        '</div>',
+                        unsafe_allow_html=True,
+                    )
+                with em_col3:
+                    st.markdown(
+                        '<div style="background:#1e293b;border:1px solid #334155;border-radius:8px;padding:15px;">'
+                        '<div style="color:#10b981;font-weight:700;">🏢 Estate Management Office</div>'
+                        '<div style="font-size:1.2rem;font-weight:600;margin:6px 0;">+65 6789 0125</div>'
+                        '<div style="font-size:0.85rem;color:#94a3b8;">Managing Agent Property Desk</div>'
+                        '</div>',
+                        unsafe_allow_html=True,
+                    )
+
+            with cmms_sub3:
+                st.subheader("Work Order System (CMMS) REST API & Webhooks")
+                st.write(
+                    "Integrate third-party systems (Jira Service Management, ServiceNow, Slack, Zapier, Make, "
+                    "or custom CMMS software) via bi-directional REST endpoints and real-time outbound webhooks."
+                )
+
+                api_col1, api_col2 = st.columns([1.2, 1.0], gap="large")
+
+                with api_col1:
+                    st.markdown("#### 🌐 REST API Endpoints")
+                    st.markdown(
+                        "Start the REST API server locally with:  \n"
+                        "`run_work_order_api.cmd` or `python -m condo_jev.work_order_api --port 8000`"
+                    )
+                    api_endpoints_data = [
+                        {"Method": "GET", "Path": "/api/health", "Description": "Service health check & basic counts"},
+                        {"Method": "GET", "Path": "/api/stats", "Description": "CMMS operational metrics & SLA rates"},
+                        {"Method": "GET", "Path": "/api/work-orders", "Description": "Query work orders (supports ?status=, ?category=, ?priority=)"},
+                        {"Method": "GET", "Path": "/api/work-orders/{id}", "Description": "Lookup single work order by ID"},
+                        {"Method": "POST", "Path": "/api/work-orders", "Description": "Create work order from external system (runs Jev triage)"},
+                        {"Method": "PATCH", "Path": "/api/work-orders/{id}", "Description": "Assign technician, change status, or submit resolution"},
+                        {"Method": "GET", "Path": "/api/technicians", "Description": "List all estate technicians & contractors"},
+                        {"Method": "GET", "Path": "/api/export/csv", "Description": "Export complete work order registry as CSV"},
+                        {"Method": "POST", "Path": "/api/webhooks/test", "Description": "Dispatch test ping to an external webhook URL"},
+                    ]
+                    st.dataframe(pd.DataFrame(api_endpoints_data), use_container_width=True, hide_index=True)
+
+                    st.markdown("**Sample cURL: Create a Work Order via API**")
+                    st.code(
+                        'curl -X POST "http://localhost:8000/api/work-orders" \\\n'
+                        '  -H "Content-Type: application/json" \\\n'
+                        '  -d \'{\n'
+                        '    "text": "The gym AC is leaking water on the rubber floor.",\n'
+                        '    "channel": "External CMMS",\n'
+                        '    "location": "Clubhouse Gym",\n'
+                        '    "resident_name": "Duty Guard"\n'
+                        '  }\'',
+                        language="bash",
+                    )
+
+                with api_col2:
+                    st.markdown("#### 🚀 Outbound Webhook Dispatcher")
+                    st.write(
+                        "Configure an external webhook URL to receive instant JSON notifications "
+                        "whenever a resident reports an issue or an admin assigns a technician."
+                    )
+                    wh_url = st.text_input(
+                        "Webhook URL (e.g. Jira, ServiceNow, Slack, Zapier):",
+                        value=os.getenv("WORK_ORDER_WEBHOOK_URL", ""),
+                        placeholder="https://hooks.slack.com/services/... or https://webhook.site/...",
+                        key="cmms_test_wh_url",
+                    )
+                    wh_secret = st.text_input(
+                        "Webhook HMAC Secret (optional):",
+                        value=os.getenv("WORK_ORDER_WEBHOOK_SECRET", ""),
+                        type="password",
+                        key="cmms_test_wh_secret",
+                    )
+
+                    if st.button("🚀 Send Test Webhook Ping", type="primary", use_container_width=True):
+                        if not wh_url.strip():
+                            st.warning("Please enter a target webhook URL.")
+                        else:
+                            with st.spinner("Dispatching webhook payload..."):
+                                sample_wo = cmms_store.list_all(limit=1)
+                                payload_obj = sample_wo[0] if sample_wo else {"test": "ping"}
+                                wh_res = dispatch_outbound_webhook(
+                                    event_type="test.ping",
+                                    work_order_data=payload_obj,
+                                    webhook_url=wh_url.strip(),
+                                    secret=wh_secret.strip() or None,
+                                )
+                            if wh_res.get("success"):
+                                st.success(f"✓ Webhook delivered successfully! HTTP Status: {wh_res.get('status_code')}")
+                            else:
+                                st.error(f"❌ Webhook delivery failed: {wh_res.get('error')} (Status: {wh_res.get('status_code')})")
+
+                    st.divider()
+                    st.markdown("#### 📥 Export Data Registry")
+                    csv_export_str = cmms_store.export_csv()
+                    st.download_button(
+                        "Download Work Orders (CSV)",
+                        csv_export_str,
+                        file_name="work_orders.csv",
+                        mime="text/csv",
+                        use_container_width=True,
+                    )
+                    json_export_str = json.dumps([o.model_dump() for o in cmms_store.list_all(limit=1000)], indent=2)
+                    st.download_button(
+                        "Download Work Orders (JSON)",
+                        json_export_str,
+                        file_name="work_orders.json",
+                        mime="application/json",
+                        use_container_width=True,
+                    )
+
+            with cmms_sub4:
+                st.subheader("Operational Analytics & SLA Telemetry")
+                a_col1, a_col2 = st.columns(2)
+                with a_col1:
+                    st.markdown("**Work Orders by Department:**")
+                    if stats["by_department"]:
+                        dept_chart_df = pd.DataFrame(
+                            list(stats["by_department"].items()),
+                            columns=["Department", "Count"],
+                        ).set_index("Department")
+                        st.bar_chart(dept_chart_df)
+                    else:
+                        st.caption("No data available.")
+
+                with a_col2:
+                    st.markdown("**Work Orders by Status:**")
+                    if stats["by_status"]:
+                        status_chart_df = pd.DataFrame(
+                            list(stats["by_status"].items()),
+                            columns=["Status", "Count"],
+                        ).set_index("Status")
+                        st.bar_chart(status_chart_df)
+                    else:
+                        st.caption("No data available.")
 
         with batch_tab:
             st.subheader("Classify requests together")

@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: condo-telegram-bot
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt && pip install -e .
+    startCommand: python run_cloud.py
+    healthCheckPath: /health
+    envVars:
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_STAFF_CHAT_ID
+        sync: false

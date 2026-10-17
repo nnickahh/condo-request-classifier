@@ -18,6 +18,7 @@ from condo_jev.schema import (
 from condo_jev.signals import (
     SafetyScreenSignal,
     extract_location,
+    resolve_domain_category_override,
     screen_request_safety,
 )
 from condo_jev.taxonomy import (
@@ -148,14 +149,15 @@ class JevTriageService:
         if prediction.calibration_status == "uncalibrated_llm_self_report":
             reasons.append("Local LLM self-reported Jev scores are uncalibrated and require staff verification.")
 
-        spec = TAXONOMY[prediction.category]
+        final_category = resolve_domain_category_override(req.text, prediction.category)
+        spec = TAXONOMY[final_category]
         missing_details: list[str] = []
         if spec.needs_location and not prediction.extracted_location:
             missing_details.append("Provide the block, floor, unit or common-area location.")
 
         return {
             "classification": Classification(
-                category=prediction.category,
+                category=final_category,
                 category_title=spec.title,
                 assigned_team=spec.team,
                 sla_target=spec.sla_window,
@@ -374,39 +376,12 @@ def build_follow_up_and_dispatch(
     noul_hazard = result.nouls.get("life_safety_hazard", 0.0)
     noul_multi = result.nouls.get("multi_intent_request", 0.0)
 
-    if result.priority == Priority.EMERGENCY or noul_hazard >= 0.50:
-        resident_reply = (
-            f"URGENT ESTATE SAFETY NOTICE ({loc_label}):\n"
-            f"We have logged your report as an EMERGENCY priority with our {result.assigned_team} "
-            f"and the 24/7 Guardhouse Command Desk ({result.sla_target}).\n\n"
-            f"• If there is immediate danger (fire, smoke, gas, or structural hazard), please keep clear of the area "
-            f"and call SCDF 995 / Police 999 immediately.\n"
-            f"• On-site personnel are being alerted now to inspect {loc_label}."
-        )
-    elif result.missing_details:
-        missing_bullets = "\n".join(f"  - {item}" for item in result.missing_details)
-        resident_reply = (
-            f"Dear Resident,\n\n"
-            f"Thank you for contacting Estate Management via {request.channel}. Your request has been "
-            f"queued for the {result.assigned_team} ({result.category_title}, Target SLA: {result.sla_target}).\n\n"
-            f"To help our team attend promptly, could you please reply with:\n"
-            f"{missing_bullets}\n\n"
-            f"Warm regards,\nEstate Management Office"
-        )
-    elif noul_multi >= 0.50:
-        resident_reply = (
-            f"Dear Resident ({loc_label}),\n\n"
-            f"Thank you for your message via {request.channel}. Because your note covers more than one "
-            f"estate topic, our Duty Officer is splitting your ticket so both the {result.assigned_team} "
-            f"({result.sla_target}) and the secondary department can follow up separately.\n\n"
-            f"Warm regards,\nEstate Management Office"
-        )
-    else:
-        resident_reply = (
-            f"Dear Resident ({loc_label}),\n\n"
-            f"We have received your {request.channel} request and routed it to our {result.assigned_team} "
-            f"under {result.category_title} (Priority: {result.priority.value.upper()}, Target SLA: {result.sla_target}).\n\n"
-            f"Warm regards,\nEstate Management Office"
+    from condo_jev.ai_response import generate_ai_resident_reply
+
+    resident_reply = generate_ai_resident_reply(request, result)
+    if noul_multi >= 0.50:
+        resident_reply += (
+            f"\n\n*(Note: Your note covers more than one topic, so we're splitting the ticket to attend to each part promptly.)*"
         )
 
     quotes_str = ", ".join(f'"{q}"' for q in result.evidence_quotes) if result.evidence_quotes else "None extracted"

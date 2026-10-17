@@ -1,0 +1,33 @@
+version: '3.8'
+
+services:
+  telegram-bot:
+    build: .
+    restart: always
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+    command: python -m condo_jev.telegram_bot
+
+  cmms-api:
+    build: .
+    restart: always
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+    command: python -m condo_jev.work_order_api --port 8000
+
+  streamlit-cmms:
+    build: .
+    restart: always
+    ports:
+      - "8501:8501"
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+    command: python -m streamlit run app.py --server.port 8501 --server.address 0.0.0.0

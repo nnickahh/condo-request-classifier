@@ -1,4 +1,5 @@
 .venv/
+.venv-broken/
 __pycache__/
 *.py[cod]
 *$py.class
@@ -8,3 +9,7 @@ __pycache__/
 *.egg-info/
 dist/
 build/
+logs/
+*.log
+test_temp.json
+data/telegram_sessions.json

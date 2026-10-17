@@ -60,8 +60,38 @@ class ResidentRequest(StrictModel):
         "Phone transcript",
         "Resident App",
         "Intercom / Call Log",
+        "Telegram",
+        "REST API",
+        "External CMMS",
     ] = "Web"
     location: str | None = Field(default=None, max_length=120, description="Optional unit number, block, or common area.")
+
+    @field_validator("channel", mode="before")
+    @classmethod
+    def normalize_channel(cls, value: Any) -> str:
+        if not isinstance(value, str) or not value.strip():
+            return "Web"
+        val = value.strip()
+        allowed = {
+            "Web",
+            "WhatsApp",
+            "Email",
+            "Phone transcript",
+            "Resident App",
+            "Intercom / Call Log",
+            "Telegram",
+            "REST API",
+            "External CMMS",
+        }
+        if val in allowed:
+            return val
+        if "api" in val.lower():
+            return "REST API"
+        if "cmms" in val.lower():
+            return "External CMMS"
+        if "app" in val.lower():
+            return "Resident App"
+        return "Web"
 
     @field_validator("text")
     @classmethod

@@ -6,3 +6,5 @@ python-dotenv>=1.0,<2
 scikit-learn>=1.6,<2
 streamlit>=1.50,<2
 typesafe-sdk>=0.7,<1
+python-telegram-bot>=21.0,<23
+opencv-python-headless>=4.10,<5

@@ -31,6 +31,7 @@ from condo_jev.signals import (
     compute_urgency_score_distribution,
     extract_evidence_spans,
     extract_location,
+    resolve_domain_category_override,
 )
 from condo_jev.taxonomy import (
     JEV_CHOICE_INSTRUCTIONS,
@@ -142,6 +143,13 @@ class LocalJevSimulatorBackend:
         }
         chosen_key = max(cat_probs, key=cat_probs.get)
         chosen_category = Category(chosen_key)
+        override_cat = resolve_domain_category_override(request.text, chosen_category)
+        if override_cat != chosen_category:
+            chosen_category = override_cat
+            top_prob = max(cat_probs.values())
+            cat_probs[chosen_category.value] = round(top_prob + 0.20, 4)
+            total = sum(cat_probs.values())
+            cat_probs = {k: round(v / total, 4) for k, v in cat_probs.items()}
         choice_conf = distribution_concentration_confidence(cat_probs)
 
         urgency_score, priority_level, score_conf, priority_probs = compute_urgency_score_distribution(
