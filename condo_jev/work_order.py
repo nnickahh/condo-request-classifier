@@ -520,6 +520,7 @@ def format_telegram_resident_card(wo: WorkOrder) -> str:
     if is_emerg:
         card = (
             f"{header}\n\n"
+            f"We have registered your issue: \"{wo.text}\"\n\n"
             f"{reply_text}\n\n"
             f"• *Reference:* `#{wo.work_order_id}`\n"
             f"• *Location:* `{loc_display}`\n"
@@ -537,6 +538,7 @@ def format_telegram_resident_card(wo: WorkOrder) -> str:
     else:
         card = (
             f"{header}\n\n"
+            f"We have registered your issue: \"{wo.text}\"\n\n"
             f"{reply_text}\n\n"
             f"• *Reference:* `#{wo.work_order_id}`\n"
             f"• *Location:* `{loc_display}`\n"

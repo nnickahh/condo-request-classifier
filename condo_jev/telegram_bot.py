@@ -1856,18 +1856,29 @@ class CondoManagementTelegramBot:
             if clean_caption and len(clean_caption.strip()) >= 3:
                 await _handle_text_report(update, context, clean_caption.strip(), photo_path=str(saved_path))
             else:
-                # Let resident transcribe the text themselves; audio is saved and attached
+                # Transcribe audio to speech text
                 media_type = "voice message" if voice else "audio recording"
-                self.session_store.set_pending_photo(res_id, str(saved_path))
-                await update.message.reply_text(
-                    f"*Audio Evidence Received*\n\n"
-                    f"Thank you for sharing the {media_type}. Your recording has been securely saved as evidence.\n\n"
-                    f"Please reply with a brief text transcription or description of your issue, including your unit or location "
-                    f"(e.g. _'Water pipe bursting outside #04-12'_).\n\n"
-                    f"{format_estate_levels_clarification()}\n\n"
-                    f"Your audio recording will be automatically attached to the official work order upon your reply.",
-                    parse_mode=ParseMode.MARKDOWN,
-                )
+                audio_transcript = transcribe_audio_to_english(saved_path)
+
+                if audio_transcript and len(audio_transcript.strip()) >= 3:
+                    await _handle_text_report(
+                        update,
+                        context,
+                        audio_transcript.strip(),
+                        photo_path=str(saved_path),
+                        is_transcribed=True,
+                    )
+                else:
+                    self.session_store.set_pending_photo(res_id, str(saved_path))
+                    await update.message.reply_text(
+                        f"*Audio Evidence Received*\n\n"
+                        f"Thank you for sharing the {media_type}. Your recording has been securely saved as evidence.\n\n"
+                        f"Please reply with a brief text transcription or description of your issue, including your unit or location "
+                        f"(e.g. _'Water pipe bursting outside #04-12'_).\n\n"
+                        f"{format_estate_levels_clarification()}\n\n"
+                        f"Once you reply, we will register your issue and attach your recording to the official work order.",
+                        parse_mode=ParseMode.MARKDOWN,
+                    )
 
         async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             if not update.message or not update.message.text:
