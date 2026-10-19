@@ -673,7 +673,6 @@ class CondoManagementTelegramBot:
                 BotCommand("status", "Check the live progress of your work order"),
                 BotCommand("myrequests", "View all your logged work orders"),
                 BotCommand("emergency", "24/7 Security & Emergency Hotlines"),
-                BotCommand("lang", "Change preferred language (English, 中文, Melayu, etc.)"),
                 BotCommand("receipt", "Official incident receipt & complaint copy"),
                 BotCommand("staff", "Estate staff & technician operations desk"),
                 BotCommand("help", "Concierge guide & instructions"),
@@ -713,41 +712,14 @@ class CondoManagementTelegramBot:
             )
 
         async def lang_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-            """Allow resident to choose their preferred language interactively."""
-            user = update.effective_user
-            res_id = str(user.id) if user else "unknown"
-            current_lang = self.session_store.get_language(res_id)
-            current_name = SUPPORTED_LANGUAGES.get(current_lang, "English")
-
-            buttons = [
-                [
-                    InlineKeyboardButton("🇬🇧 English", callback_data="setlang:en"),
-                    InlineKeyboardButton("🇨🇳 中文 (Chinese)", callback_data="setlang:zh"),
-                ],
-                [
-                    InlineKeyboardButton("🇲🇾 Bahasa Melayu", callback_data="setlang:ms"),
-                    InlineKeyboardButton("🇮🇳 தமிழ் (Tamil)", callback_data="setlang:ta"),
-                ],
-                [
-                    InlineKeyboardButton("🇯🇵 日本語 (Japanese)", callback_data="setlang:ja"),
-                    InlineKeyboardButton("🇰🇷 한국어 (Korean)", callback_data="setlang:ko"),
-                ],
-                [
-                    InlineKeyboardButton("🇪🇸 Español (Spanish)", callback_data="setlang:es"),
-                    InlineKeyboardButton("🇫🇷 Français (French)", callback_data="setlang:fr"),
-                ],
-            ]
+            """Inform resident of the estate's official language standard."""
             text = (
-                f"*LANGUAGE PREFERENCE & MULTILINGUAL ASSISTANT*\n\n"
-                f"• *Current Language:* **{current_name}**\n\n"
-                f"You can send messages and voice notes in any language. The concierge automatically translates all resident reports and audio evidence to English for estate staff dispatch, and replies to you in your preferred language.\n\n"
-                f"Please select your preferred language below:"
+                "*ESTATE COMMUNICATIONS STANDARD*\n\n"
+                "• *Official Language:* **English (MCST 4521 Standard)**\n\n"
+                "All official estate notices, work order records, status tracking, and formal incident receipts are issued in English.\n\n"
+                "You are welcome to submit reports or descriptions in any language; our concierge will translate your input into English for estate triage and staff dispatch."
             )
-            await update.message.reply_text(
-                text,
-                reply_markup=InlineKeyboardMarkup(buttons),
-                parse_mode=ParseMode.MARKDOWN,
-            )
+            await update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
 
         async def faq_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             """Interactive menu for estate FAQs and RAG knowledge base."""
@@ -1185,10 +1157,6 @@ class CondoManagementTelegramBot:
                 return
 
             receipt_text = format_resident_receipt(wo)
-            if pref_lang != "en":
-                t_receipt = translate_text(receipt_text, target_lang=pref_lang)
-                if t_receipt.is_translated:
-                    receipt_text = t_receipt.translated_text
             await update.message.reply_text(receipt_text, parse_mode=ParseMode.MARKDOWN)
 
         async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1603,13 +1571,6 @@ class CondoManagementTelegramBot:
                 wo = self.store.get(wo_id)
                 if wo:
                     receipt_text = format_resident_receipt(wo)
-                    user = query.from_user
-                    res_id = str(user.id) if user else "unknown"
-                    pref_lang = self.session_store.get_language(res_id)
-                    if pref_lang != "en":
-                        t_receipt = translate_text(receipt_text, target_lang=pref_lang)
-                        if t_receipt.is_translated:
-                            receipt_text = t_receipt.translated_text
                     await query.message.reply_text(receipt_text, parse_mode=ParseMode.MARKDOWN)
                 else:
                     await query.message.reply_text(f"Could not locate Work Order `#{wo_id}`.", parse_mode=ParseMode.MARKDOWN)
@@ -1895,34 +1856,18 @@ class CondoManagementTelegramBot:
             if clean_caption and len(clean_caption.strip()) >= 3:
                 await _handle_text_report(update, context, clean_caption.strip(), photo_path=str(saved_path))
             else:
-                # Transcribe audio to English text
+                # Let resident transcribe the text themselves; audio is saved and attached
                 media_type = "voice message" if voice else "audio recording"
-                audio_transcript = transcribe_audio_to_english(saved_path)
-
-                if audio_transcript and len(audio_transcript.strip()) >= 3:
-                    await update.message.reply_text(
-                        f"*Audio Evidence Transcribed to English*\n\n"
-                        f"• *Transcript:* \"_{audio_transcript}_\",\n\n"
-                        f"Processing your issue triage now...",
-                        parse_mode=ParseMode.MARKDOWN,
-                    )
-                    await _handle_text_report(
-                        update,
-                        context,
-                        audio_transcript,
-                        photo_path=str(saved_path),
-                        is_transcribed=True,
-                    )
-                else:
-                    self.session_store.set_pending_photo(res_id, str(saved_path))
-                    await update.message.reply_text(
-                        f"*Audio Evidence Received*\n\n"
-                        f"Thank you for sharing the {media_type}. Please reply with a brief description of the issue and your unit or location "
-                        f"(e.g. _'Water pipe bursting outside #04-12'_).\n\n"
-                        f"{format_estate_levels_clarification()}\n\n"
-                        f"I will automatically attach your recording to the official work order.",
-                        parse_mode=ParseMode.MARKDOWN,
-                    )
+                self.session_store.set_pending_photo(res_id, str(saved_path))
+                await update.message.reply_text(
+                    f"*Audio Evidence Received*\n\n"
+                    f"Thank you for sharing the {media_type}. Your recording has been securely saved as evidence.\n\n"
+                    f"Please reply with a brief text transcription or description of your issue, including your unit or location "
+                    f"(e.g. _'Water pipe bursting outside #04-12'_).\n\n"
+                    f"{format_estate_levels_clarification()}\n\n"
+                    f"Your audio recording will be automatically attached to the official work order upon your reply.",
+                    parse_mode=ParseMode.MARKDOWN,
+                )
 
         async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             if not update.message or not update.message.text:
@@ -2513,15 +2458,8 @@ class CondoManagementTelegramBot:
             username = user.username if user else None
             full_name = f"{user.first_name or ''} {user.last_name or ''}".strip() if user else None
 
-            # Detect incoming language and translate to English for internal processing
-            pref_lang = self.session_store.get_language(res_id)
+            # If text is in a foreign language, translate to English for internal triage and staff dispatch
             det_lang, det_lang_name = detect_language(text_body)
-
-            # Auto-update resident's language if a clear foreign language was detected
-            if det_lang != "en" and pref_lang == "en":
-                self.session_store.set_language(res_id, det_lang)
-                pref_lang = det_lang
-
             original_input_text = text_body
             english_text = text_body
             if det_lang != "en":
@@ -2533,10 +2471,6 @@ class CondoManagementTelegramBot:
             rag_answer = answer_condo_enquiry(english_text) or answer_condo_enquiry(text_body)
             if rag_answer and rag_answer.get("answered"):
                 rag_reply = rag_answer["reply"]
-                if pref_lang != "en":
-                    t_reply = translate_text(rag_reply, target_lang=pref_lang)
-                    if t_reply.is_translated:
-                        rag_reply = t_reply.translated_text
                 if rag_answer.get("article_id") == "FAC-BBQ-CLEAN":
                     pit_match = re.search(r"\b(?:bbq\s*pit|pit)\s*([1-4])\b", text_body, re.IGNORECASE)
                     if pit_match:
@@ -2651,12 +2585,7 @@ class CondoManagementTelegramBot:
             # Validate location in report against estate directory
             val_res = validate_estate_location(english_text) or validate_estate_location(text_body)
             if not val_res.is_valid:
-                err_msg = val_res.error_message
-                if pref_lang != "en":
-                    t_err = translate_text(err_msg, target_lang=pref_lang)
-                    if t_err.is_translated:
-                        err_msg = t_err.translated_text
-                await update.message.reply_text(err_msg, parse_mode=ParseMode.MARKDOWN)
+                await update.message.reply_text(val_res.error_message, parse_mode=ParseMode.MARKDOWN)
                 return
 
             # Check if this is a noise disturbance complaint
@@ -2678,10 +2607,6 @@ class CondoManagementTelegramBot:
                         "location_hint": extracted_loc,
                     }
                     prompt = format_noise_clarification_prompt(location_str=extracted_loc)
-                    if pref_lang != "en":
-                        t_prompt = translate_text(prompt, target_lang=pref_lang)
-                        if t_prompt.is_translated:
-                            prompt = t_prompt.translated_text
                     await update.message.reply_text(prompt, parse_mode=ParseMode.MARKDOWN)
                     return
 
@@ -2705,10 +2630,6 @@ class CondoManagementTelegramBot:
                     "• Estate Management Office: `+65 6789 0125` (Mon–Fri 9:00 AM – 6:00 PM)\n"
                     "• 24/7 Security Guardhouse: `+65 6789 0123`"
                 )
-                if pref_lang != "en":
-                    t_unrec = translate_text(unrec_msg, target_lang=pref_lang)
-                    if t_unrec.is_translated:
-                        unrec_msg = t_unrec.translated_text
                 await update.message.reply_text(unrec_msg, parse_mode=ParseMode.MARKDOWN)
                 return
 
@@ -2749,10 +2670,6 @@ class CondoManagementTelegramBot:
                             f"2. *Pillar or Lot Number:* (e.g. `B1 near Lot 42` or `B2 near Pillar BB3`)\n\n"
                             f"Once provided, our team will be dispatched directly to the exact spot."
                         )
-                        if pref_lang != "en":
-                            t_cp = translate_text(carpark_prompt, target_lang=pref_lang)
-                            if t_cp.is_translated:
-                                carpark_prompt = t_cp.translated_text
                         if carpark_map_path.exists():
                             try:
                                 with open(carpark_map_path, "rb") as map_file:
@@ -2784,10 +2701,6 @@ class CondoManagementTelegramBot:
                         f"{format_estate_levels_clarification()}\n\n"
                         f"Once you provide your location, this ticket will be dispatched immediately to our on-duty team."
                     )
-                    if pref_lang != "en":
-                        t_loc = translate_text(loc_prompt, target_lang=pref_lang)
-                        if t_loc.is_translated:
-                            loc_prompt = t_loc.translated_text
                     await update.message.reply_text(loc_prompt, reply_markup=loc_markup, parse_mode=ParseMode.MARKDOWN)
                     return
 
@@ -2799,18 +2712,11 @@ class CondoManagementTelegramBot:
                 ]
                 markup = InlineKeyboardMarkup(inline_rows) if inline_rows else None
 
-                # Translate resident card if resident's language preference is not English
-                final_card_text = card_text
-                if pref_lang != "en":
-                    t_card = translate_text(card_text, target_lang=pref_lang)
-                    if t_card.is_translated:
-                        final_card_text = t_card.translated_text
-
                 try:
-                    await update.message.reply_text(final_card_text, parse_mode=ParseMode.MARKDOWN, reply_markup=markup)
+                    await update.message.reply_text(card_text, parse_mode=ParseMode.MARKDOWN, reply_markup=markup)
                 except Exception:
                     # Fallback if markdown triggers parsing anomaly
-                    await update.message.reply_text(final_card_text, reply_markup=markup)
+                    await update.message.reply_text(card_text, reply_markup=markup)
 
                 # If staff chat ID is configured, forward dispatch brief with one-touch action buttons
                 if self.staff_chat_id:

@@ -821,5 +821,19 @@ def test_format_resident_receipt(temp_store: WorkOrderStore, triage_service: Jev
     assert f"status:{wo.work_order_id}" in button_callbacks
 
 
+def test_audio_pending_and_text_self_transcription(tmp_path: Path):
+    from condo_jev.telegram_bot import TelegramSessionStore
 
+    sess_file = tmp_path / "sessions.json"
+    session_store = TelegramSessionStore(file_path=sess_file)
 
+    res_id = "user_audio_test"
+    audio_path = "data/attachments/audio_user_audio_test_20261019_130000.ogg"
+
+    # User uploads audio -> bot stores as pending photo/attachment without auto-transcribing
+    session_store.set_pending_photo(res_id, audio_path)
+
+    # User transcribes the text themselves in their next message
+    popped = session_store.pop_pending_photo(res_id)
+    assert popped == audio_path
+    assert session_store.pop_pending_photo(res_id) is None
