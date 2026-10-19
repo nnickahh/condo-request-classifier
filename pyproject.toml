@@ -3,7 +3,7 @@ requires = ["setuptools>=68.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "condo-jev-triage"
+name = "condo-agent"
 version = "0.2.0"
 description = "Jev System-One condominium resident request triage using Choice, Score, and Noul primitives with LangGraph and Streamlit."
 readme = "readme.md"
