@@ -517,6 +517,20 @@ def format_telegram_resident_card(wo: WorkOrder) -> str:
 
     photo_line = f"\n• *Photo Evidence:* Attached (`{Path(wo.photo_path).name}`)" if wo.photo_path else ""
 
+    # Enrich with Estate Knowledge Graph RAG (Valves, Risers, By-Laws)
+    rag_lines = ""
+    try:
+        from condo_jev.graph_rag import get_estate_vault
+        estate_rag = get_estate_vault().query(wo.text, unit_hint=wo.location, hops=2)
+        if estate_rag.grounded:
+            infras = [i for i in estate_rag.affected_infrastructure if "Unit #" not in i]
+            if infras:
+                rag_lines += f"\n• *Connected Infrastructure:* {', '.join(infras[:3])}"
+            if estate_rag.by_laws_cited:
+                rag_lines += f"\n• *Governing By-Law:* {', '.join(estate_rag.by_laws_cited[:2])}"
+    except Exception:
+        pass
+
     if is_emerg:
         card = (
             f"{header}\n\n"
@@ -524,7 +538,7 @@ def format_telegram_resident_card(wo: WorkOrder) -> str:
             f"{reply_text}\n\n"
             f"• *Reference:* `#{wo.work_order_id}`\n"
             f"• *Location:* `{loc_display}`\n"
-            f"• *Status:* Priority Emergency Dispatched to {wo.assigned_team}{tech_line}{photo_line}\n"
+            f"• *Status:* Priority Emergency Dispatched to {wo.assigned_team}{tech_line}{photo_line}{rag_lines}\n"
             f"• {prio_str} (Estimated SLA: {wo.sla_target})\n\n"
             f"Our on-duty emergency team has been alerted for immediate intervention.\n\n"
             f"*Immediate Emergency Contacts:*\n"
@@ -542,7 +556,7 @@ def format_telegram_resident_card(wo: WorkOrder) -> str:
             f"{reply_text}\n\n"
             f"• *Reference:* `#{wo.work_order_id}`\n"
             f"• *Location:* `{loc_display}`\n"
-            f"• *Status:* Assigned to on-duty team ({wo.assigned_team}){tech_line}{photo_line}\n"
+            f"• *Status:* Assigned to on-duty team ({wo.assigned_team}){tech_line}{photo_line}{rag_lines}\n"
             f"• {prio_str} (Estimated SLA: {wo.sla_target})\n\n"
             f"Our team has been notified. You may wait for an officer to attend on-site, "
             f"or if you prefer to speak with someone directly, reply here or contact our 24/7 duty desk at `+65 6789 0123`.\n\n"

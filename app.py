@@ -69,6 +69,7 @@ from condo_jev.condo_enquiries_rag import (
     get_all_categories,
     get_articles_by_category,
 )
+from condo_jev.graph_rag import get_estate_vault
 
 ROOT = Path(__file__).resolve().parent
 load_dotenv(ROOT / ".env")
@@ -1472,11 +1473,12 @@ def main() -> None:
         st.session_state.pop("compare_result", None)
 
     with st.container(key="tablet_panel"):
-        resident_tab, cmms_tab, single_tab, batch_tab, evaluation_tab, guide_tab, showcase_tab = st.tabs(
+        resident_tab, cmms_tab, single_tab, graph_tab, batch_tab, evaluation_tab, guide_tab, showcase_tab = st.tabs(
             [
                 "🏢 Resident Portal & Policy FAQ",
                 "🛠️ Operations Dashboard & Review Desk",
                 "Classify a request",
+                "🏛️ Estate Knowledge Graph (RAG)",
                 "Batch review",
                 "Evaluation",
                 "Category guide",
@@ -2944,6 +2946,126 @@ def main() -> None:
                             st.markdown(f"- *\"{q}\"*")
                         st.markdown("**Full Policy Text & Regulations:**")
                         st.markdown(art["content"])
+
+        with graph_tab:
+            st.subheader("Estate Knowledge Graph & Hybrid RAG Explorer")
+            st.caption(
+                "Interactive Knowledge Graph RAG over estate by-laws, vertical stacks, risers, and SLAs. "
+                "Performs bidirectional BFS expansion across Wikilinks."
+            )
+
+            vault = get_estate_vault()
+
+            g_m1, g_m2, g_m3, g_m4 = st.columns(4)
+            g_m1.metric("Vault Notes", len(vault.notes))
+            bylaw_count = sum(1 for n in vault.notes.values() if n.note_type == "ByLaw")
+            g_m2.metric("By-Laws & Rules", bylaw_count)
+            unit_count = sum(
+                1 for n in vault.notes.values() if n.note_type in {"Unit", "Stack", "Building"}
+            )
+            g_m3.metric("Physical Assets", unit_count)
+            contractor_count = sum(
+                1 for n in vault.notes.values() if n.note_type in {"Contractor", "InternalTeam"}
+            )
+            g_m4.metric("Contractors / Teams", contractor_count)
+
+            st.divider()
+
+            st.markdown("### 🔍 Test Multi-Hop Estate RAG")
+            preset_scenarios = [
+                "Select a test query...",
+                "🚨 Water is leaking from ceiling in #08-04",
+                "🚫 Can my contractor do drilling tomorrow Saturday?",
+                "🍖 How much is the deposit to book BBQ Pit 1 and what are the hours?",
+                "🚗 My visitor parked overnight in a resident lot, is there a wheel clamp fee?",
+                "🐕 What are the rules on keeping pets and dogs in common areas?",
+            ]
+            selected_preset = st.selectbox("Quick Query Presets", preset_scenarios, index=0, key="graph_rag_preset")
+
+            default_q = ""
+            if selected_preset != "Select a test query...":
+                default_q = selected_preset.split(" ", 1)[1] if " " in selected_preset else selected_preset
+
+            user_rag_query = st.text_input("Resident Question or Incident Query", value=default_q, key="graph_rag_query_input")
+
+            hop_col, btn_col = st.columns([1, 2])
+            with hop_col:
+                rag_hops = st.slider("Graph Expansion Hops (BFS)", 1, 3, 2, key="graph_rag_hops_slider")
+            with btn_col:
+                st.write("")
+                st.write("")
+                run_rag = st.button("🚀 Run Hybrid Graph RAG Query", type="primary", key="graph_rag_run_btn")
+
+            if user_rag_query and run_rag:
+                with st.spinner("Traversing estate knowledge graph..."):
+                    rag_result = vault.query(user_rag_query, hops=rag_hops, max_notes=12)
+
+                st.success(
+                    f"Grounded Subgraph Retrieved ({len(rag_result.expanded_nodes)} Connected Entities)"
+                )
+
+                ans_col, graph_col = st.columns([1.1, 0.9])
+                with ans_col:
+                    st.markdown("#### Grounded Answer Synthesis")
+                    st.markdown(rag_result.answer)
+
+                    if rag_result.by_laws_cited:
+                        b_str = ", ".join(f"`{b}`" for b in rag_result.by_laws_cited)
+                        st.markdown(f"**Cited By-Laws:** {b_str}")
+                    if rag_result.affected_infrastructure:
+                        i_str = ", ".join(f"`{i}`" for i in rag_result.affected_infrastructure)
+                        st.markdown(f"**Affected Assets:** {i_str}")
+
+                with graph_col:
+                    st.markdown("#### Connected Subgraph Traversal")
+                    st.caption(f"Seeds: {', '.join(rag_result.seed_nodes)}")
+                    st.caption(f"Traversed Nodes: {', '.join(rag_result.expanded_nodes)}")
+
+                    if rag_result.edges:
+                        edge_df = pd.DataFrame(
+                            [
+                                {"Source": s, "Relationship": r, "Target": t}
+                                for s, r, t in rag_result.edges
+                            ]
+                        )
+                        st.dataframe(edge_df, use_container_width=True, hide_index=True)
+                    else:
+                        st.info("No inter-node edges in current subgraph scope.")
+
+                with st.expander("Inspect Raw Grounded Subgraph Prompt Context"):
+                    st.code(rag_result.context_text, language="markdown")
+
+            st.divider()
+            st.markdown("### 📚 Estate Vault Knowledge Base Browser")
+            selected_note_title = st.selectbox(
+                "Browse Note Details",
+                sorted(vault.notes.keys()),
+                index=0,
+                key="graph_rag_note_browser",
+            )
+            if selected_note_title and selected_note_title in vault.notes:
+                note_obj = vault.notes[selected_note_title]
+                nb1, nb2 = st.columns([1, 1])
+                with nb1:
+                    st.markdown(f"**Type:** `{note_obj.note_type}` | **Category:** `{note_obj.category}`")
+                    if note_obj.aliases:
+                        st.caption(f"Aliases: {', '.join(note_obj.aliases)}")
+                    st.markdown(note_obj.body)
+                with nb2:
+                    st.markdown("**Outgoing Relationships:**")
+                    if note_obj.relationships:
+                        for rel, tgt in note_obj.relationships:
+                            st.markdown(f"• **{rel}** ➔ `[[{tgt}]]`")
+                    else:
+                        st.caption("No outgoing relationships recorded.")
+
+                    st.markdown("**Incoming Backlinks:**")
+                    in_edges = vault.incoming_edges.get(selected_note_title, set())
+                    if in_edges:
+                        for rel, src in in_edges:
+                            st.markdown(f"• `[[{src}]]` ➔ **{rel}**")
+                    else:
+                        st.caption("No incoming backlinks recorded.")
 
         with batch_tab:
             st.subheader("Classify requests together")

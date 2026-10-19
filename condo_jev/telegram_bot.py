@@ -23,6 +23,7 @@ from condo_jev.condo_enquiries_rag import (
     format_staff_enquiry_log,
     get_article_by_id,
 )
+from condo_jev.graph_rag import get_estate_vault
 from condo_jev.estate_directory import (
     extract_estate_components,
     extract_noise_details,
@@ -669,6 +670,7 @@ class CondoManagementTelegramBot:
             commands = [
                 BotCommand("new", "Log a new maintenance request or issue"),
                 BotCommand("report", "Report a maintenance or security issue"),
+                BotCommand("ask", "Query the Estate Knowledge Graph RAG (By-Laws & Risers)"),
                 BotCommand("faq", "Estate bylaws, facilities & rules Q&A"),
                 BotCommand("status", "Check the live progress of your work order"),
                 BotCommand("myrequests", "View all your logged work orders"),
@@ -720,6 +722,41 @@ class CondoManagementTelegramBot:
                 "You are welcome to submit reports or descriptions in any language; our concierge will translate your input into English for estate triage and staff dispatch."
             )
             await update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
+
+        async def ask_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+            """Query the Condo Estate Knowledge Graph RAG directly via /ask."""
+            import html as _html
+            message = update.message
+            if not message:
+                return
+
+            query_text = " ".join(context.args) if context.args else ""
+            if not query_text:
+                await message.reply_text(
+                    "<b>ESTATE KNOWLEDGE GRAPH ASSISTANT</b>\n\n"
+                    "Ask any question about estate by-laws, risers, isolation valves, facilities, or policies.\n\n"
+                    "<b>Examples:</b>\n"
+                    "• <code>/ask Can my contractor drill tomorrow Saturday?</code>\n"
+                    "• <code>/ask What is the deposit to book BBQ Pit 1?</code>\n"
+                    "• <code>/ask Water leak in master bath ceiling #08-04</code>\n"
+                    "• <code>/ask What is the wheel clamp release fee?</code>",
+                    parse_mode=ParseMode.HTML,
+                )
+                return
+
+            vault = get_estate_vault()
+            result = vault.query(query_text, hops=2, max_notes=12)
+
+            safe_answer = _html.escape(result.answer)
+            formatted_body = re.sub(r"\*\*(.*?)\*\*", r"<b>\1</b>", safe_answer)
+            formatted_body = re.sub(r"### (.*?)\n", r"\n<b>\1</b>\n", formatted_body)
+
+            response_text = (
+                f"<b>ESTATE KNOWLEDGE GRAPH INTELLIGENCE</b>\n\n"
+                f"{formatted_body}\n\n"
+                f"<i>Subgraph Context: {len(result.expanded_nodes)} connected entities traversed</i>"
+            )
+            await message.reply_text(response_text, parse_mode=ParseMode.HTML)
 
         async def faq_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             """Interactive menu for estate FAQs and RAG knowledge base."""
@@ -2761,6 +2798,7 @@ class CondoManagementTelegramBot:
         app.add_error_handler(global_error_handler)
         app.add_handler(CommandHandler("start", start_cmd))
         app.add_handler(CommandHandler("help", help_cmd))
+        app.add_handler(CommandHandler("ask", ask_cmd))
         app.add_handler(CommandHandler("faq", faq_cmd))
         app.add_handler(CommandHandler("emergency", emergency_cmd))
         app.add_handler(CommandHandler("lang", lang_cmd))
