@@ -400,15 +400,25 @@ class CondoManagementTelegramBot:
         return "\n".join(lines)
 
     def get_welcome_message(self, resident_name: str | None = None) -> str:
-        """Ultra-concise, executive resident concierge welcome message."""
+        """Clear, friendly, and professional 24/7 resident concierge greeting."""
         salutation = f", {resident_name}" if resident_name else ""
         return (
-            f"*{CONDO_NAME.upper()} · MCST {MCST_NO}*\n"
+            f"*{CONDO_NAME} · MCST {MCST_NO}*\n"
             f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"Good day{salutation}.\n\n"
-            f"Welcome to your 24/7 Resident Concierge.\n"
-            f"Report an issue, ask about facilities, or attach a photo to begin.\n\n"
-            f"How may we assist you today?"
+            f"Good day{salutation}! Welcome to your 24/7 Resident Concierge.\n\n"
+            f"I am here to assist you with anything around the estate. You can chat with me naturally or send a photo anytime:\n\n"
+            f"• *Report an Issue or Defect*\n"
+            f"  Simply describe the problem with your unit or location:\n"
+            f"  _\"Corridor light flickering outside #05-12\"_\n"
+            f"  _\"Water leak near the gym entrance\"_\n\n"
+            f"• *Ask Estate Enquiries & Bylaws*\n"
+            f"  Ask questions about facilities, hours, or rules:\n"
+            f"  _\"What are the swimming pool and gym hours?\"_\n"
+            f"  _\"How do I book the BBQ pavilion?\"_\n\n"
+            f"• *Helpful Commands*\n"
+            f"  `/status` — Check progress on your logged requests\n"
+            f"  `/emergency` — 24/7 guardhouse and emergency contacts\n\n"
+            f"How may we assist you today? Feel free to type below to begin."
         )
 
     def get_resident_welcome_markup(self) -> Any:
@@ -641,20 +651,6 @@ class CondoManagementTelegramBot:
             user = update.effective_user
             user_name = user.first_name if user else None
             welcome_text = self.get_welcome_message(user_name)
-            hero_path = Path(__file__).resolve().parent.parent / "output" / "hero" / "condo-bg-editorial.jpg"
-
-            if hero_path.exists():
-                try:
-                    with open(hero_path, "rb") as photo_file:
-                        await update.message.reply_photo(
-                            photo=photo_file,
-                            caption=welcome_text,
-                            parse_mode=ParseMode.MARKDOWN,
-                            reply_markup=self.get_resident_welcome_markup(),
-                        )
-                        return
-                except Exception as exc:
-                    logger.warning(f"Failed to send welcome hero banner: {exc}")
 
             await update.message.reply_text(
                 welcome_text,
