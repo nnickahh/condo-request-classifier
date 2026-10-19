@@ -46,6 +46,7 @@ from condo_jev.work_order import (
     build_staff_alert_markup,
     format_resident_assigned_notification,
     format_resident_closed_notification,
+    format_resident_receipt,
     format_resident_resolved_notification,
     format_resident_status_notification,
     format_staff_dispatch_alert,
@@ -673,6 +674,7 @@ class CondoManagementTelegramBot:
                 BotCommand("myrequests", "View all your logged work orders"),
                 BotCommand("emergency", "24/7 Security & Emergency Hotlines"),
                 BotCommand("lang", "Change preferred language (English, 中文, Melayu, etc.)"),
+                BotCommand("receipt", "Official incident receipt & complaint copy"),
                 BotCommand("staff", "Estate staff & technician operations desk"),
                 BotCommand("help", "Concierge guide & instructions"),
             ]
@@ -1158,6 +1160,37 @@ class CondoManagementTelegramBot:
             full_text = " ".join(context.args)
             await _handle_text_report(update, context, full_text)
 
+        async def receipt_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+            """Allow resident to retrieve an official incident receipt for their work order."""
+            user = update.effective_user
+            res_id = str(user.id) if user else "unknown"
+            pref_lang = self.session_store.get_language(res_id)
+
+            if context.args:
+                wo_id = context.args[0]
+            else:
+                orders = self.store.list_for_resident(res_id)
+                if not orders:
+                    await update.message.reply_text(
+                        "You do not have any logged work orders yet. To report an issue, simply describe it here!\n"
+                        "Or specify a ticket number: `/receipt WO-EST-1042`",
+                        parse_mode=ParseMode.MARKDOWN,
+                    )
+                    return
+                wo_id = orders[0].work_order_id
+
+            wo = self.store.get(wo_id)
+            if not wo:
+                await update.message.reply_text(f"Work Order `{wo_id}` was not found.")
+                return
+
+            receipt_text = format_resident_receipt(wo)
+            if pref_lang != "en":
+                t_receipt = translate_text(receipt_text, target_lang=pref_lang)
+                if t_receipt.is_translated:
+                    receipt_text = t_receipt.translated_text
+            await update.message.reply_text(receipt_text, parse_mode=ParseMode.MARKDOWN)
+
         async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             query = update.callback_query
             await query.answer()
@@ -1565,6 +1598,21 @@ class CondoManagementTelegramBot:
                     if trans.is_translated:
                         confirm_msg = trans.translated_text
                 await query.edit_message_text(confirm_msg, parse_mode=ParseMode.MARKDOWN)
+            elif data.startswith("receipt:"):
+                wo_id = data.split(":", 1)[1]
+                wo = self.store.get(wo_id)
+                if wo:
+                    receipt_text = format_resident_receipt(wo)
+                    user = query.from_user
+                    res_id = str(user.id) if user else "unknown"
+                    pref_lang = self.session_store.get_language(res_id)
+                    if pref_lang != "en":
+                        t_receipt = translate_text(receipt_text, target_lang=pref_lang)
+                        if t_receipt.is_translated:
+                            receipt_text = t_receipt.translated_text
+                    await query.message.reply_text(receipt_text, parse_mode=ParseMode.MARKDOWN)
+                else:
+                    await query.message.reply_text(f"Could not locate Work Order `#{wo_id}`.", parse_mode=ParseMode.MARKDOWN)
 
         async def location_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             """Handle GPS location pins shared by residents via Telegram."""
@@ -2807,6 +2855,7 @@ class CondoManagementTelegramBot:
         app.add_handler(CommandHandler("new", report_cmd))
         app.add_handler(CommandHandler("newticket", report_cmd))
         app.add_handler(CommandHandler("ticket", report_cmd))
+        app.add_handler(CommandHandler("receipt", receipt_cmd))
         app.add_handler(CommandHandler("staff", staff_cmd))
         app.add_handler(CommandHandler("pending", pending_cmd))
         app.add_handler(CommandHandler("techs", techs_cmd))

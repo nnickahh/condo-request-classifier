@@ -343,7 +343,12 @@ def send_telegram_direct_message(
 def build_resident_card_markup(wo: WorkOrder) -> dict[str, Any]:
     """Build interactive inline keyboard buttons for resident cards."""
     return {
-        "inline_keyboard": []
+        "inline_keyboard": [
+            [
+                {"text": "📄 Download Official Receipt", "callback_data": f"receipt:{wo.work_order_id}"},
+                {"text": "🔍 Track Status", "callback_data": f"status:{wo.work_order_id}"},
+            ]
+        ]
     }
 
 
@@ -543,6 +548,35 @@ def format_telegram_resident_card(wo: WorkOrder) -> str:
             f"• Make another report: `/new`"
         )
     return card
+
+
+def format_resident_receipt(wo: WorkOrder) -> str:
+    """Format an official formal incident & service receipt suitable for resident records or insurance."""
+    date_str = wo.created_at.strftime("%d %b %Y, %I:%M %p") if hasattr(wo.created_at, "strftime") else str(wo.created_at)[:16]
+    handle = f"@{wo.resident_username}" if wo.resident_username else f"User {wo.resident_id}"
+    resident_name = wo.resident_name or handle
+    loc = wo.location or "Confirming with resident"
+    evidence_line = f"\n• *Attached Evidence:* `{Path(wo.photo_path).name}`" if wo.photo_path else ""
+
+    receipt = (
+        f"*OFFICIAL INCIDENT & REPORT RECEIPT*\n"
+        f"Emerald Bay Residences (MCST 4521)\n\n"
+        f"• *Work Order ID:* `#{wo.work_order_id}`\n"
+        f"• *Date & Time Logged:* {date_str}\n"
+        f"• *Resident:* {resident_name}\n"
+        f"• *Location / Unit:* `{loc}`\n"
+        f"• *Category:* {wo.category_title}\n"
+        f"• *Priority:* {wo.priority.value.upper()} (Target SLA: {wo.sla_target})\n"
+        f"• *Assigned Unit:* {wo.assigned_team}{evidence_line}\n\n"
+        f"*Report Description:*\n"
+        f"\"{wo.text}\"\n\n"
+        f"This document confirms that your complaint / service request has been formally registered in our CMMS registry. "
+        f"Keep this reference number for all future inquiries.\n\n"
+        f"• Live Status Tracker: `/status {wo.work_order_id}`\n"
+        f"• Estate Management Office: `+65 6789 0125`\n"
+        f"• 24/7 Guardhouse & Intercom: `+65 6789 0123`"
+    )
+    return receipt
 
 
 def format_staff_dispatch_alert(wo: WorkOrder) -> str:

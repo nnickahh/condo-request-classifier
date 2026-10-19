@@ -288,8 +288,11 @@ def test_resident_card_buttons_removed(temp_store: WorkOrderStore, triage_servic
     wo = temp_store.create_work_order(request=req, classification=decision, resident_id="res_btn_test")
 
     markup = build_resident_card_markup(wo)
-    # Must have empty inline keyboard (no Live Status, Update Location, Officer Follow-up, Emergency Hotlines buttons)
-    assert markup.get("inline_keyboard") == []
+    # Contains official receipt download and status tracking buttons
+    buttons = markup.get("inline_keyboard", [])[0]
+    callbacks = [b["callback_data"] for b in buttons]
+    assert f"receipt:{wo.work_order_id}" in callbacks
+    assert f"status:{wo.work_order_id}" in callbacks
 
 
 def test_ai_response_clarifies_levels_when_missing_location(triage_service: JevTriageService):
@@ -782,6 +785,41 @@ def test_telegram_session_store_language_preference(tmp_path: Path):
     store.set_language("user_456", "ms")
     assert store.get_language("user_456") == "ms"
     assert store.get_language("user_123") == "zh"
+
+
+def test_format_resident_receipt(temp_store: WorkOrderStore, triage_service: JevTriageService):
+    from condo_jev.work_order import format_resident_receipt, build_resident_card_markup
+
+    req = ResidentRequest(
+        text="Major ceiling leak in Master Bedroom from upper unit",
+        channel="Telegram",
+        location="#14-02",
+    )
+    decision = triage_service.classify(req)
+    wo = temp_store.create_work_order(
+        request=req,
+        classification=decision,
+        resident_id="tg_9999",
+        resident_username="alice_tan",
+        resident_name="Alice Tan",
+    )
+
+    receipt = format_resident_receipt(wo)
+    assert "OFFICIAL INCIDENT & REPORT RECEIPT" in receipt
+    assert "Emerald Bay Residences (MCST 4521)" in receipt
+    assert wo.work_order_id in receipt
+    assert "Alice Tan" in receipt
+    assert "#14-02" in receipt
+    assert "Major ceiling leak" in receipt
+    assert "Live Status Tracker" in receipt
+
+    # Verify resident card markup includes receipt download button
+    markup = build_resident_card_markup(wo)
+    buttons = markup["inline_keyboard"][0]
+    button_callbacks = [b["callback_data"] for b in buttons]
+    assert f"receipt:{wo.work_order_id}" in button_callbacks
+    assert f"status:{wo.work_order_id}" in button_callbacks
+
 
 
 
