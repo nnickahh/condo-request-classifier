@@ -27,7 +27,9 @@ _EMERGENCY_PATTERNS: list[tuple[re.Pattern[str], Category, str]] = [
     ),
     (
         re.compile(
-            r"\b(fire\b|flames\b|burning\s+smell|smell\s+of\s+burning|smell\s+of\s+gas|gas\s+leak|gas\s+smell|smoke\s+(and\s+flames\s+)?coming|smoke\s+detected|fire\s+alarm|sparks\s+flying|electrical\s+fire|explosion\b)\b",
+            r"\b(fire\b|flames\b|burning\s+smell|smell\s+of\s+burning|smell\s+of\s+gas|gas\s+leak|gas\s+smell|"
+            r"smoke\s+(and\s+flames\s+)?coming|smoke\s+detected|fire\s+alarm|sparks\s+flying|sparking|"
+            r"emitting\s+smoke|electrical\s+fire|explosion\b)\b",
             re.IGNORECASE,
         ),
         Category.MAINTENANCE,
@@ -87,7 +89,10 @@ _SENSITIVE_PATTERNS: list[re.Pattern[str]] = [
 
 _HIGH_PRIORITY_PATTERNS: list[re.Pattern[str]] = [
     re.compile(
-        r"\b(urgent|urgently|asap|immediately|right\s+now|locked\s+out|no\s+water|power\s+trip|tripping\s+the\s+circuit|jerky\s+stopping|unresponsive\s+door|blackout|blocking\s+my\s+(car|lot)|hornet|wasp|snake|rat\s+inside)\b",
+        r"\b(urgent|urgently|asap|immediately|right\s+now|locked\s+out|no\s+water|power\s+trip|tripping\s+the\s+circuit|"
+        r"jerky\s+stopping|unresponsive\s+door|blackout|blocking\s+my\s+(car|lot)|hornet|wasp|snake|rat\s+inside|"
+        r"aggressive\s+dog|dog\s+bite|dog\s+attack|sparking|short\s+circuit|blocked\s+exit|water\s+overflowing|gushing|"
+        r"ceiling\s+leaking\s+badly)\b",
         re.IGNORECASE,
     ),
 ]
@@ -147,6 +152,53 @@ _CLEANLINESS_PATTERNS = re.compile(
     re.IGNORECASE,
 )
 
+_PARKING_PATTERNS = re.compile(
+    r"\b(parked\s+in\s+my|parked\s+at\s+my|blocking\s+(?:my\s+)?(?:car|lot|vehicle|bay|driveway)|"
+    r"unauthorized\s+car|unauthorized\s+vehicle|wheel\s+clamp|clamp(?:ed)?|carpark\s+lot|visitor\s+lot|"
+    r"season\s+parking|ev\s+charg(?:ing|er)|barrier\s+not\s+(?:open|reading|detecting|raising)|"
+    r"transponder|iu\s+number|car\s+scratched|parking\s+barrier)\b",
+    re.IGNORECASE,
+)
+
+_RENOVATION_PATTERNS = re.compile(
+    r"\b(renovation|hacking\s+noise|drilling\s+(?:on\s+sunday|outside\s+hours|before\s+9am|after\s+5pm)|"
+    r"contractor\s+hacking|lift\s+padding|mover|moving\s+in|moving\s+out|renovation\s+permit|"
+    r"contractor\s+debris|hacking\s+wall)\b",
+    re.IGNORECASE,
+)
+
+_NOISE_PATTERNS = re.compile(
+    r"\b(loud\s+music|loud\s+party|singing\s+karaoke|midnight\s+noise|quiet\s+hours|"
+    r"dog\s+barking|barking\s+dog|stomping\s+(?:above|upstairs)|screaming\s+and\s+shouting|"
+    r"dragging\s+chairs|banging\s+doors|blaring\s+music|throwing\s+cigarette\s+butts?|"
+    r"cigarette\s+smoke\s+drifting|smoke\s+drifting\s+in)\b",
+    re.IGNORECASE,
+)
+
+_SECURITY_PATTERNS = re.compile(
+    r"\b(access\s+card|key\s+fob|intercom\s+(?:access|buzzer|call)|side\s+gate|main\s+gate|"
+    r"turnstile|security\s+guard|guardhouse|guard\s+duty|guards?\b|refused\s+entry|"
+    r"suspicious\s+(?:person|stranger|man|woman|activity)|tailgat(?:ing|e)|trespass(?:ing|er)?|"
+    r"cctv\s+footage|cctv\s+recording|stolen|theft|thief|burglar|shoe\s+rack\s+theft|"
+    r"prowler|peeping\s+tom|vandalism|unauthorized\s+entry|stranger\s+wandering)\b",
+    re.IGNORECASE,
+)
+
+_FACILITIES_PATTERNS = re.compile(
+    r"\b(treadmill|gym\s+equipment|gym\s+machine|elliptical|gym\s+weights?|dumbbells?|"
+    r"tennis\s+(?:court|net|lights)|badminton\s+court|squash\s+court|function\s+room|"
+    r"bbq\s+pit|clubhouse|swimming\s+pool|jacuzzi|sauna|steam\s+room|"
+    r"book\s+(?:bbq|tennis|function|court|gym)|facility\s+booking|booking\s+deposit)\b",
+    re.IGNORECASE,
+)
+
+_BILLING_PATTERNS = re.compile(
+    r"\b(maintenance\s+fees?|sinking\s+fund|payment\s+receipt|giro\s+deduction|"
+    r"statement\s+of\s+accounts?|invoice|deposit\s+refund|charged\s+twice|billing\s+enquiry|"
+    r"levy\s+on\s+my|late\s+payment\s+interest)\b",
+    re.IGNORECASE,
+)
+
 
 def resolve_domain_category_override(text: str, predicted_category: Category) -> Category:
     """
@@ -174,6 +226,18 @@ def resolve_domain_category_override(text: str, predicted_category: Category) ->
     if has_cleanliness and not has_plumbing_maint:
         if predicted_category in (Category.FACILITIES, Category.GENERAL, Category.OTHER):
             return Category.CLEANLINESS
+
+    # Gym equipment / amenity breakdown when falsely categorized as Cleanliness
+    if predicted_category == Category.CLEANLINESS and re.search(r"\b(treadmill|gym\s+equipment|gym\s+machine|elliptical|dumbbells?)\b", clean):
+        return Category.FACILITIES
+
+    # Security guard conduct or entry refusal
+    if re.search(r"\b(security\s+guard|guardhouse|refused\s+entry|guard\s+was\s+rude)\b", clean):
+        return Category.SECURITY
+
+    # Heavy hacking or contractor renovation noise (distinguish from casual noise)
+    if re.search(r"\b(heavy\s+hacking|hacking\s+drilling|contractor\s+hacking)\b", clean):
+        return Category.RENOVATION
 
     return predicted_category
 

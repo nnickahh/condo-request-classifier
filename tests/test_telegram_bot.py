@@ -859,3 +859,21 @@ def test_child_and_infant_emergency_life_safety(temp_store: WorkOrderStore, tria
         assert "+65 6789 0123" in card  # 24/7 Guardhouse
         assert text in card
 
+
+def test_semantic_intent_domain_recognition(triage_service: JevTriageService):
+    cases = [
+        ("Someone scratched my car in the visitor carpark", Category.PARKING, Priority.NORMAL),
+        ("The gym treadmill belt snapped while I was jogging", Category.FACILITIES, Priority.NORMAL),
+        ("Security guard was rude and refused entry to my mother", Category.SECURITY, Priority.NORMAL),
+        ("Neighbor throwing cigarette butts down into my balcony", Category.NOISE, Priority.NORMAL),
+        ("Uncut grass has created a mosquito nest", Category.CLEANLINESS, Priority.NORMAL),
+        ("Need to book function room for my daughter's birthday next month", Category.FACILITIES, Priority.LOW),
+        ("Why was I charged twice for the sinking fund levy on my invoice", Category.BILLING, Priority.NORMAL),
+        ("Heavy hacking drilling on Sunday morning from unit above", Category.RENOVATION, Priority.NORMAL),
+        ("The water heater is sparking and emitting smoke in #12-04", Category.MAINTENANCE, Priority.EMERGENCY),
+        ("Corridor light flickering outside #08-14", Category.MAINTENANCE, Priority.NORMAL),
+    ]
+    for text, exp_cat, exp_prio in cases:
+        dec = triage_service.classify(ResidentRequest(text=text, channel="Telegram"))
+        assert dec.category == exp_cat, f"Expected {exp_cat} for '{text}', got {dec.category}"
+        assert dec.priority == exp_prio, f"Expected {exp_prio} for '{text}', got {dec.priority}"
