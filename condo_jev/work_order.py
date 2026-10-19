@@ -507,18 +507,36 @@ def format_telegram_resident_card(wo: WorkOrder) -> str:
 
     photo_line = f"\n• *Photo Evidence:* Attached (`{Path(wo.photo_path).name}`)" if wo.photo_path else ""
 
-    card = (
-        f"{header}\n\n"
-        f"{reply_text}\n\n"
-        f"• *Reference:* `#{wo.work_order_id}`\n"
-        f"• *Location:* `{loc_display}`\n"
-        f"• *Status:* Assigned to on-duty team ({wo.assigned_team}){tech_line}{photo_line}\n"
-        f"• {prio_str} (Estimated SLA: {wo.sla_target})\n\n"
-        f"Our team has been notified. You may wait for an officer to attend on-site, "
-        f"or if you prefer to speak with someone directly, reply here or contact our 24/7 duty desk at `+65 6789 0123`.\n\n"
-        f"• Track live status: `/status {wo.work_order_id}`\n"
-        f"• Make another report: `/new`"
-    )
+    if is_emerg:
+        card = (
+            f"{header}\n\n"
+            f"{reply_text}\n\n"
+            f"• *Reference:* `#{wo.work_order_id}`\n"
+            f"• *Location:* `{loc_display}`\n"
+            f"• *Status:* Priority Emergency Dispatched to {wo.assigned_team}{tech_line}{photo_line}\n"
+            f"• {prio_str} (Estimated SLA: {wo.sla_target})\n\n"
+            f"Our on-duty emergency team has been alerted for immediate intervention.\n\n"
+            f"*Immediate Emergency Contacts:*\n"
+            f"• Police Emergency: `999`\n"
+            f"• SCDF (Fire & Ambulance): `995`\n"
+            f"• 24/7 Estate Guardhouse: `+65 6789 0123`\n"
+            f"• Lift Emergency Desk: `+65 6789 0124`\n\n"
+            f"• Track live status: `/status {wo.work_order_id}`\n"
+            f"• Make another report: `/new`"
+        )
+    else:
+        card = (
+            f"{header}\n\n"
+            f"{reply_text}\n\n"
+            f"• *Reference:* `#{wo.work_order_id}`\n"
+            f"• *Location:* `{loc_display}`\n"
+            f"• *Status:* Assigned to on-duty team ({wo.assigned_team}){tech_line}{photo_line}\n"
+            f"• {prio_str} (Estimated SLA: {wo.sla_target})\n\n"
+            f"Our team has been notified. You may wait for an officer to attend on-site, "
+            f"or if you prefer to speak with someone directly, reply here or contact our 24/7 duty desk at `+65 6789 0123`.\n\n"
+            f"• Track live status: `/status {wo.work_order_id}`\n"
+            f"• Make another report: `/new`"
+        )
     return card
 
 

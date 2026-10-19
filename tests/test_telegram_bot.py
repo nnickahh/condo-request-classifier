@@ -690,3 +690,58 @@ def test_carpark_ambiguity_two_step_clarification(temp_store: WorkOrderStore, tr
     assert updated is not None
     assert updated.location == "Basement 1 near Lot 42"
 
+
+def test_emergency_triage_classification(triage_service: JevTriageService):
+    emergency_texts = [
+        "Fire in the trash chute at Tower B level 3",
+        "Someone is stuck inside lift 2 at Block A, please help immediately!",
+        "Someone collapsed near the swimming pool and is unconscious",
+        "Severe gas leak smell detected outside #05-02",
+        "Burglary in progress, intruder broke into unit #10-04",
+    ]
+    for text in emergency_texts:
+        req = ResidentRequest(text=text, channel="Telegram")
+        decision = triage_service.classify(req)
+        assert decision.priority == Priority.EMERGENCY, f"Expected emergency priority for: {text}"
+        assert decision.nouls.get("life_safety_hazard", 0.0) >= 0.50
+
+
+def test_emergency_resident_card_includes_hotlines(temp_store: WorkOrderStore, triage_service: JevTriageService):
+    req = ResidentRequest(
+        text="Fire broke out at Block B corridor ceiling!",
+        channel="Telegram",
+        location="Block B Level 4",
+    )
+    decision = triage_service.classify(req)
+    wo = temp_store.create_work_order(
+        request=req,
+        classification=decision,
+        resident_id="user_emerg",
+    )
+    assert wo.priority == Priority.EMERGENCY
+    card = format_telegram_resident_card(wo)
+    assert "URGENT EMERGENCY REPORT" in card
+    assert "995" in card  # SCDF
+    assert "999" in card  # Police
+
+
+def test_audio_evidence_attachment(temp_store: WorkOrderStore, triage_service: JevTriageService):
+    req = ResidentRequest(
+        text="Strange loud drilling sounds from unit above #07-12",
+        channel="Telegram",
+        location="#07-12",
+    )
+    decision = triage_service.classify(req)
+    wo = temp_store.create_work_order(
+        request=req,
+        classification=decision,
+        resident_id="user_audio",
+    )
+
+    audio_file_path = "data/attachments/audio_user_audio_20261019_130000.ogg"
+    updated = temp_store.attach_photo(wo.work_order_id, audio_file_path, filename="audio_user_audio_20261019_130000.ogg")
+    assert updated is not None
+    assert updated.photo_path == audio_file_path
+    assert updated.attachment_filename == "audio_user_audio_20261019_130000.ogg"
+
+

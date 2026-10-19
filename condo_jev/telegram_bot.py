@@ -506,6 +506,7 @@ class CondoManagementTelegramBot:
         category: Category | str | None = None,
         priority: Priority | str | None = None,
         is_emergency: bool = False,
+        attachment_path: str | None = None,
     ) -> None:
         """
         Route staff dispatch alert directly to relevant topic thread.
@@ -529,6 +530,21 @@ class CondoManagementTelegramBot:
                 )
                 print(f"[STAFF DISPATCH SUCCESS] Dispatched to chat {self.staff_chat_id}, topic thread {thread_id}", flush=True)
 
+                if attachment_path and Path(attachment_path).exists():
+                    try:
+                        ext = Path(attachment_path).suffix.lower()
+                        with open(attachment_path, "rb") as media_f:
+                            if ext in (".ogg", ".oga"):
+                                await context.bot.send_voice(chat_id=self.staff_chat_id, voice=media_f, message_thread_id=thread_id)
+                            elif ext in (".mp3", ".wav", ".m4a", ".aac"):
+                                await context.bot.send_audio(chat_id=self.staff_chat_id, audio=media_f, message_thread_id=thread_id)
+                            elif ext in (".mp4", ".mov", ".avi"):
+                                await context.bot.send_video(chat_id=self.staff_chat_id, video=media_f, message_thread_id=thread_id)
+                            elif ext in (".jpg", ".jpeg", ".png"):
+                                await context.bot.send_photo(chat_id=self.staff_chat_id, photo=media_f, message_thread_id=thread_id)
+                    except Exception as media_err:
+                        logger.warning(f"Could not forward media attachment to staff thread: {media_err}")
+
                 # If this is a critical emergency, ALSO broadcast an alert to General!
                 if is_critical:
                     await self._broadcast_emergency_to_general(context, text, category, priority_str)
@@ -546,6 +562,20 @@ class CondoManagementTelegramBot:
                     reply_markup=reply_markup,
                 )
                 print(f"[STAFF DISPATCH SUCCESS] Dispatched critical alert to general chat {self.staff_chat_id}", flush=True)
+                if attachment_path and Path(attachment_path).exists():
+                    try:
+                        ext = Path(attachment_path).suffix.lower()
+                        with open(attachment_path, "rb") as media_f:
+                            if ext in (".ogg", ".oga"):
+                                await context.bot.send_voice(chat_id=self.staff_chat_id, voice=media_f)
+                            elif ext in (".mp3", ".wav", ".m4a", ".aac"):
+                                await context.bot.send_audio(chat_id=self.staff_chat_id, audio=media_f)
+                            elif ext in (".mp4", ".mov", ".avi"):
+                                await context.bot.send_video(chat_id=self.staff_chat_id, video=media_f)
+                            elif ext in (".jpg", ".jpeg", ".png"):
+                                await context.bot.send_photo(chat_id=self.staff_chat_id, photo=media_f)
+                    except Exception as media_err:
+                        logger.warning(f"Could not forward media attachment to general staff chat: {media_err}")
             except Exception as exc:
                 logger.warning(f"Failed to deliver critical alert to staff chat {self.staff_chat_id}: {exc}")
         else:
@@ -1673,6 +1703,91 @@ class CondoManagementTelegramBot:
                     parse_mode=ParseMode.MARKDOWN,
                 )
 
+        async def audio_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+            """Handle voice notes and audio evidence sent by residents."""
+            if not update.message:
+                return
+
+            voice = update.message.voice
+            audio = update.message.audio
+            if not voice and not audio:
+                return
+
+            caption = update.message.caption or ""
+            user = update.effective_user
+            chat = update.effective_chat
+            res_id = str(user.id) if user else "unknown"
+            username = user.username if user else None
+            full_name = f"{user.first_name or ''} {user.last_name or ''}".strip() if user else None
+
+            is_group = chat.type in ("group", "supergroup")
+            has_mention = False
+            bot_username = self.bot_username
+            if caption and bot_username and f"@{bot_username.lower()}" in caption.lower():
+                has_mention = True
+
+            reply_msg = update.message.reply_to_message
+            is_reply_to_bot = False
+            if reply_msg and reply_msg.from_user:
+                if reply_msg.from_user.id == context.bot.id:
+                    is_reply_to_bot = True
+                elif bot_username and reply_msg.from_user.username and reply_msg.from_user.username.lower() == bot_username.lower():
+                    is_reply_to_bot = True
+
+            if is_group and not (has_mention or is_reply_to_bot):
+                return
+
+            clean_caption = _clean_bot_mention(caption, bot_username)
+
+            attachments_dir = Path(__file__).resolve().parent.parent / "data" / "attachments"
+            attachments_dir.mkdir(parents=True, exist_ok=True)
+
+            media_obj = voice or audio
+            file_id = media_obj.file_id
+            audio_file = await context.bot.get_file(file_id)
+
+            timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+            ext = ".ogg" if voice else (Path(audio.file_name).suffix.lower() if audio and audio.file_name else ".mp3")
+            if not ext or ext not in (".ogg", ".oga", ".mp3", ".wav", ".m4a", ".aac"):
+                ext = ".ogg" if voice else ".mp3"
+
+            filename = f"audio_{res_id}_{timestamp_str}{ext}"
+            saved_path = attachments_dir / filename
+            await audio_file.download_to_drive(str(saved_path))
+
+            # If user swiped to reply to an existing Work Order message with this audio
+            if reply_msg:
+                replied_text = reply_msg.text or reply_msg.caption or ""
+                wo_match = re.search(r"#?(WO-EST-\d{4,6}|EST-\d{4,6})", replied_text)
+                if wo_match:
+                    raw_wo_id = wo_match.group(1)
+                    target_wo_id = raw_wo_id if raw_wo_id.startswith("WO-") else f"WO-{raw_wo_id}"
+                    updated = self.store.attach_photo(target_wo_id, str(saved_path), filename=filename)
+                    if updated:
+                        note_suffix = f"\n• Note: _{clean_caption}_" if clean_caption else ""
+                        if clean_caption:
+                            self.store.update_status(target_wo_id, updated.status, note=f"Resident audio note: {clean_caption}", notify_resident=False)
+                        await update.message.reply_text(
+                            f"*Audio Evidence Attached*\n\n"
+                            f"Your audio recording has been attached to Work Order `#{updated.work_order_id}`.{note_suffix}",
+                            parse_mode=ParseMode.MARKDOWN,
+                        )
+                        return
+
+            if clean_caption and len(clean_caption.strip()) >= 3:
+                await _handle_text_report(update, context, clean_caption.strip(), photo_path=str(saved_path))
+            else:
+                self.session_store.set_pending_photo(res_id, str(saved_path))
+                media_type = "voice message" if voice else "audio recording"
+                await update.message.reply_text(
+                    f"*Audio Evidence Received*\n\n"
+                    f"Thank you for sharing the {media_type}. Please reply with a brief description of the issue and your unit or location "
+                    f"(e.g. _'Water pipe bursting outside #04-12'_).\n\n"
+                    f"{format_estate_levels_clarification()}\n\n"
+                    f"I will automatically attach your recording to the official work order.",
+                    parse_mode=ParseMode.MARKDOWN,
+                )
+
         async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             if not update.message or not update.message.text:
                 return
@@ -2411,20 +2526,8 @@ class CondoManagementTelegramBot:
             preview_decision = self.triage_service.classify(preview_req)
             is_emergency = preview_decision.priority == Priority.EMERGENCY or preview_decision.nouls.get("life_safety_hazard", 0.0) >= 0.50
 
-            if is_emergency and preview_decision.category not in (Category.MAINTENANCE, Category.NOISE):
-                await update.message.reply_text(
-                    "*EMERGENCY ALERT*\n\n"
-                    "This automated resident portal reviews condominium maintenance, repairs, and urgent noise disturbances. "
-                    "For urgent life safety incidents, please contact emergency responders immediately:\n\n"
-                    "• Police Emergency: `999`\n"
-                    "• SCDF (Fire & Ambulance): `995`\n"
-                    "• 24/7 Estate Guardhouse: `+65 6789 0123`\n\n"
-                    "Our on-duty security team will assist you right away.",
-                    parse_mode=ParseMode.MARKDOWN,
-                )
-                return
-
-            if preview_decision.category not in (Category.MAINTENANCE, Category.NOISE) and not is_noise_complaint(text_body):
+            # Only reject if not an emergency and category is GENERAL or OTHER without noise complaint
+            if not is_emergency and preview_decision.category in (Category.GENERAL, Category.OTHER) and not is_noise_complaint(text_body):
                 await update.message.reply_text(
                     "*CONDOMINIUM RESIDENT CONCIERGE*\n\n"
                     "I didn't recognize that as an active estate defect or recognized condo policy enquiry.\n\n"
@@ -2448,9 +2551,9 @@ class CondoManagementTelegramBot:
                     photo_path=photo_path,
                 )
 
-                # LOCATION GATING: Only dispatch to staff if location is concrete
+                # LOCATION GATING: Non-emergencies require concrete location before staff dispatch
                 has_loc = is_concrete_estate_location(wo.location, text_body)
-                if not has_loc:
+                if not has_loc and wo.priority != Priority.EMERGENCY:
                     self.session_store.set_pending_location(res_id, wo.work_order_id)
                     self._pending_location_requests[res_id] = wo.work_order_id
 
@@ -2534,6 +2637,8 @@ class CondoManagementTelegramBot:
                         reply_markup=staff_markup,
                         category=wo.category,
                         priority=wo.priority,
+                        is_emergency=(wo.priority == Priority.EMERGENCY),
+                        attachment_path=wo.photo_path,
                     )
             except Exception as exc:
                 logger.error(f"Error handling text report: {exc}")
@@ -2600,6 +2705,7 @@ class CondoManagementTelegramBot:
         app.add_handler(MessageHandler(filters.LOCATION, location_handler))
         app.add_handler(MessageHandler(filters.PHOTO, photo_handler))
         app.add_handler(MessageHandler(filters.VIDEO, video_handler))
+        app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, audio_handler))
         app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
 
         return app

@@ -19,7 +19,7 @@ class SafetyScreenSignal:
 _EMERGENCY_PATTERNS: list[tuple[re.Pattern[str], Category, str]] = [
     (
         re.compile(
-            r"\b(trapped\s+in\s+(the\s+)?(lift|elevator)|stuck\s+inside\s+(the\s+)?(lift|elevator)|lift\s+stuck\s+with\s+(people|child|passenger|someone))\b",
+            r"\b(trapped\s+(in|inside)\s+(the\s+)?(lift|elevator)|stuck\s+(in|inside)\s+(the\s+)?(lift|elevator)|lift\s+(is\s+)?stuck|elevator\s+(is\s+)?stuck|lift\s+(broke\s+down|stopped)\s+with\s+(people|passenger|someone|child)|passenger\s+trapped|lift\s+dropped|lift\s+falling)\b",
             re.IGNORECASE,
         ),
         Category.MAINTENANCE,
@@ -27,15 +27,15 @@ _EMERGENCY_PATTERNS: list[tuple[re.Pattern[str], Category, str]] = [
     ),
     (
         re.compile(
-            r"\b(smell\s+of\s+gas|gas\s+leak|smoke\s+(and\s+flames\s+)?coming\s+(out\s+)?from|flames\s+(coming|in|seen)|fire\s+alarm\s+ringing|burning\s+smell\s+from\s+(switchboard|panel|riser)|sparks\s+flying|electrical\s+fire)\b",
+            r"\b(fire\b|flames\b|burning\s+smell|smell\s+of\s+burning|smell\s+of\s+gas|gas\s+leak|gas\s+smell|smoke\s+(and\s+flames\s+)?coming|smoke\s+detected|fire\s+alarm|sparks\s+flying|electrical\s+fire|explosion\b)\b",
             re.IGNORECASE,
         ),
         Category.MAINTENANCE,
-        "Life-safety emergency: fire, smoke, gas, or acute electrical hazard detected.",
+        "Life-safety emergency: fire, smoke, gas, explosion, or acute electrical hazard detected.",
     ),
     (
         re.compile(
-            r"\b(water\s+gushing|(?:burst\s+(?:water\s+)?(?:pipe|main)|(?:water\s+)?pipe\s+(?:has\s+)?burst)|flooding\s+(?:the\s+)?(?:corridor|lobby|lift|unit|basement|carpark)|ceiling\s+collapsed)\b",
+            r"\b(water\s+gushing|(?:burst\s+(?:water\s+)?(?:pipe|main)|(?:water\s+)?pipe\s+(?:has\s+)?burst)|flooding\s+(?:the\s+)?(?:corridor|lobby|lift|unit|basement|carpark)|major\s+flood|ceiling\s+collapsed|structural\s+collapse|caved\s+in)\b",
             re.IGNORECASE,
         ),
         Category.MAINTENANCE,
@@ -43,11 +43,19 @@ _EMERGENCY_PATTERNS: list[tuple[re.Pattern[str], Category, str]] = [
     ),
     (
         re.compile(
-            r"\b(breaking\s+into|active\s+break-?in|intruder\s+with|violent\s+fight|someone\s+(is\s+)?trying\s+to\s+force\s+open|armed|physical\s+assault)\b",
+            r"\b(unconscious|drowning|drowned|heart\s+attack|person\s+collapsed|medical\s+emergency|not\s+breathing|severe\s+bleeding|ambulance\s+needed|passed\s+out\s+at\s+(the\s+)?(pool|gym))\b",
             re.IGNORECASE,
         ),
         Category.SECURITY,
-        "Immediate security emergency: active break-in or physical threat reported.",
+        "Immediate medical or life-safety incident reported on estate grounds.",
+    ),
+    (
+        re.compile(
+            r"\b(break-?in\b|breaking\s+into|active\s+break-?in|burglar|intruder|violent\s+fight|someone\s+(is\s+)?trying\s+to\s+force\s+open|armed\s+with|knife|weapon|physical\s+assault|robbery\b|hostage)\b",
+            re.IGNORECASE,
+        ),
+        Category.SECURITY,
+        "Immediate security emergency: active break-in, weapon, or physical threat reported.",
     ),
 ]
 
