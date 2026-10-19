@@ -402,25 +402,16 @@ class CondoManagementTelegramBot:
         return "\n".join(lines)
 
     def get_welcome_message(self, resident_name: str | None = None) -> str:
-        """Clear, friendly, and professional 24/7 resident concierge greeting."""
+        """Concise, professional 24/7 resident concierge greeting."""
         salutation = f", {resident_name}" if resident_name else ""
         return (
             f"*{CONDO_NAME} · MCST {MCST_NO}*\n"
             f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
             f"Good day{salutation}! Welcome to your 24/7 Resident Concierge.\n\n"
-            f"I am here to assist you with anything around the estate. You can chat with me naturally or send a photo anytime:\n\n"
-            f"• *Report an Issue or Defect*\n"
-            f"  Simply describe the problem with your unit or location:\n"
-            f"  _\"Corridor light flickering outside #05-12\"_\n"
-            f"  _\"Water leak near the gym entrance\"_\n\n"
-            f"• *Ask Estate Enquiries & Bylaws*\n"
-            f"  Ask questions about facilities, hours, or rules:\n"
-            f"  _\"What are the swimming pool and gym hours?\"_\n"
-            f"  _\"How do I book the BBQ pavilion?\"_\n\n"
-            f"• *Helpful Commands*\n"
-            f"  `/status` — Check progress on your logged requests\n"
-            f"  `/emergency` — 24/7 guardhouse and emergency contacts\n\n"
-            f"How may we assist you today? Feel free to type below to begin."
+            f"Simply type a message or send a photo to:\n"
+            f"• *Report an issue* with your unit or location (e.g. _\"Corridor light flickering outside #05-12\"_)\n"
+            f"• *Ask estate questions* (e.g. pool hours, BBQ booking, visitor parking)\n\n"
+            f"How may we assist you today?"
         )
 
     def get_resident_welcome_markup(self) -> Any:
