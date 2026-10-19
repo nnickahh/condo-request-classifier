@@ -344,39 +344,8 @@ def build_resident_card_markup(wo: WorkOrder) -> dict[str, Any]:
 
 def build_quick_location_markup(wo_id: str, is_noise: bool = False) -> dict[str, Any]:
     """Build interactive inline keyboard buttons with common estate locations for fast one-tap response."""
-    if is_noise:
-        return {
-            "inline_keyboard": [
-                [
-                    {"text": "Block A", "callback_data": f"quick_loc:{wo_id}:Block A"},
-                    {"text": "Block B", "callback_data": f"quick_loc:{wo_id}:Block B"},
-                    {"text": "Block C", "callback_data": f"quick_loc:{wo_id}:Block C"},
-                ],
-                [
-                    {"text": "Swimming Pool", "callback_data": f"quick_loc:{wo_id}:Swimming Pool"},
-                    {"text": "BBQ Pavilion", "callback_data": f"quick_loc:{wo_id}:BBQ Pavilion"},
-                ],
-                [
-                    {"text": "Clubhouse", "callback_data": f"quick_loc:{wo_id}:Clubhouse Level 1"},
-                    {"text": "Carpark B1", "callback_data": f"quick_loc:{wo_id}:Carpark B1"},
-                ],
-            ]
-        }
     return {
-        "inline_keyboard": [
-            [
-                {"text": "Swimming Pool", "callback_data": f"quick_loc:{wo_id}:Swimming Pool"},
-                {"text": "Gymnasium", "callback_data": f"quick_loc:{wo_id}:Gym"},
-            ],
-            [
-                {"text": "Clubhouse L1", "callback_data": f"quick_loc:{wo_id}:Clubhouse Level 1"},
-                {"text": "BBQ Pavilion", "callback_data": f"quick_loc:{wo_id}:BBQ Pavilion"},
-            ],
-            [
-                {"text": "Carpark B1", "callback_data": f"quick_loc:{wo_id}:Carpark B1"},
-                {"text": "Carpark B2", "callback_data": f"quick_loc:{wo_id}:Carpark B2"},
-            ],
-        ]
+        "inline_keyboard": []
     }
 
 
@@ -498,7 +467,8 @@ def format_resident_closed_notification(wo: WorkOrder) -> tuple[str, dict[str, A
     text = (
         f"*WORK ORDER CLOSED: `#{wo.work_order_id}`*\n\n"
         f"Work Order `#{wo.work_order_id}` has been confirmed resolved and archived in our estate registry.\n\n"
-        f"How would you rate your resolution experience?"
+        f"How would you rate your service experience?\n\n"
+        f"_Whenever you need to make a new report or inquiry, simply type `/new` anytime._"
     )
     markup = {
         "inline_keyboard": [
@@ -546,7 +516,8 @@ def format_telegram_resident_card(wo: WorkOrder) -> str:
         f"• {prio_str} (Estimated SLA: {wo.sla_target})\n\n"
         f"Our team has been notified. You may wait for an officer to attend on-site, "
         f"or if you prefer to speak with someone directly, reply here or contact our 24/7 duty desk at `+65 6789 0123`.\n\n"
-        f"Check live status anytime with: `/status {wo.work_order_id}`"
+        f"• Track live status: `/status {wo.work_order_id}`\n"
+        f"• Make another report: `/new`"
     )
     return card
 
@@ -1200,7 +1171,10 @@ class WorkOrderStore:
             for i, rec in enumerate(records):
                 w_id = str(rec.get("work_order_id", "")).upper()
                 t_id = str(rec.get("ticket_id", "")).upper()
-                if clean_id in (w_id, t_id, w_id.replace("WO-", ""), t_id.replace("EST-", "")):
+                if (
+                    clean_id in (w_id, t_id, w_id.replace("WO-", ""), t_id.replace("EST-", ""))
+                    or (clean_id.isdigit() and clean_id in t_id)
+                ):
                     rec["resident_feedback_rating"] = max(1, min(5, rating))
                     if comment:
                         rec["resident_feedback_comment"] = comment.strip()
@@ -1307,7 +1281,10 @@ class WorkOrderStore:
             for i, rec in enumerate(records):
                 w_id = str(rec.get("work_order_id", "")).upper()
                 t_id = str(rec.get("ticket_id", "")).upper()
-                if clean_id in (w_id, t_id, w_id.replace("WO-", ""), t_id.replace("EST-", "")):
+                if (
+                    clean_id in (w_id, t_id, w_id.replace("WO-", ""), t_id.replace("EST-", ""))
+                    or (clean_id.isdigit() and clean_id in t_id)
+                ):
                     rec["resident_feedback_rating"] = int(rating)
                     if comment:
                         rec["resident_feedback_comment"] = comment

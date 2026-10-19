@@ -583,22 +583,59 @@ def test_topic_manager_enquiries_routing(tmp_path: Path):
 
 
 def test_get_resident_reply_keyboard(tmp_path: Path):
+    from telegram import ReplyKeyboardRemove
     from condo_jev.telegram_bot import CondoManagementTelegramBot
     from condo_jev.work_order import WorkOrderStore
     bot = CondoManagementTelegramBot(work_order_store=WorkOrderStore(file_path=tmp_path / "orders.json"))
     kb = bot.get_resident_reply_keyboard()
     assert kb is not None
-    assert kb.resize_keyboard is True
-    assert kb.is_persistent is True
-    assert len(kb.keyboard) == 2
-    # Row 1
-    row0_texts = [btn.text for btn in kb.keyboard[0]]
-    assert "🛠️ Report Issue" in row0_texts
-    assert "❓ FAQ & Bylaws" in row0_texts
-    # Row 2
-    row1_texts = [btn.text for btn in kb.keyboard[1]]
-    assert "📋 My Requests" in row1_texts
-    assert "🚨 Emergency Hotlines" in row1_texts
+    assert isinstance(kb, ReplyKeyboardRemove)
+
+
+def test_get_resident_welcome_markup(tmp_path: Path):
+    from telegram import ReplyKeyboardRemove
+    from condo_jev.telegram_bot import CondoManagementTelegramBot
+    from condo_jev.work_order import WorkOrderStore
+    bot = CondoManagementTelegramBot(work_order_store=WorkOrderStore(file_path=tmp_path / "orders.json"))
+    markup = bot.get_resident_welcome_markup()
+    assert markup is not None
+    assert isinstance(markup, ReplyKeyboardRemove)
+
+
+def test_resident_service_review_and_status_display(temp_store: WorkOrderStore, triage_service: JevTriageService):
+    bot = CondoManagementTelegramBot(
+        triage_service=triage_service,
+        work_order_store=temp_store,
+    )
+    req = ResidentRequest(
+        text="Corridor light flickering outside #08-14.",
+        channel="Telegram",
+        location="#08-14",
+    )
+    dec = triage_service.classify(req)
+    wo = temp_store.create_work_order(
+        request=req,
+        classification=dec,
+        resident_id="tg_review_user",
+    )
+    assert wo.resident_feedback_rating is None
+
+    # Record feedback via record_feedback
+    updated = temp_store.record_feedback(wo.work_order_id, rating=5)
+    assert updated is not None
+    assert updated.resident_feedback_rating == 5
+    assert any("5/5" in n for n in updated.notes)
+
+    # Verify status query reflects the rating
+    status_text = bot.handle_status_query(wo.work_order_id)
+    assert "*Resident Rating:* 5 / 5 Stars" in status_text
+
+    # Verify numeric id also works
+    ticket_num = wo.ticket_id.replace("EST-", "")
+    updated_num = temp_store.record_feedback(ticket_num, rating=4)
+    assert updated_num is not None
+    assert updated_num.resident_feedback_rating == 4
+
 
 
 

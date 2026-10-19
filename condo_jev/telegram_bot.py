@@ -17,6 +17,8 @@ from dotenv import load_dotenv
 
 from condo_jev.backends import LocalJevSimulatorBackend
 from condo_jev.condo_enquiries_rag import (
+    CONDO_NAME,
+    MCST_NO,
     answer_condo_enquiry,
     format_staff_enquiry_log,
     get_article_by_id,
@@ -352,6 +354,7 @@ class CondoManagementTelegramBot:
         if wo.assigned_technician and wo.technician_vendor:
             tech_line += f" · {wo.technician_vendor}"
         res_line = f"\n• *Resolution:* {wo.resolution_summary}" if wo.resolution_summary else ""
+        rating_line = f"\n• *Resident Rating:* {wo.resident_feedback_rating} / 5 Stars" if wo.resident_feedback_rating else ""
         photo_line = f"\n• *Photo Evidence:* Attached (`{Path(wo.photo_path).name}`)" if wo.photo_path else ""
         notes_str = "\n".join(f"  • {n}" for n in wo.notes[-3:]) if wo.notes else "No additional notes."
 
@@ -365,7 +368,7 @@ class CondoManagementTelegramBot:
             f"• *Priority:* {prio_label}\n"
             f"• *Target SLA:* {wo.sla_target}\n"
             f"• *Location:* {loc_display}\n"
-            f"• *Current Status:* *{wo.status}*{res_line}\n"
+            f"• *Current Status:* *{wo.status}*{res_line}{rating_line}\n"
             f"• *Logged At:* {wo.created_at[:19].replace('T', ' ')} UTC\n\n"
             f"*Original Report:*\n_{wo.text}_\n\n"
             f"*Recent Updates:*\n{notes_str}"
@@ -397,51 +400,30 @@ class CondoManagementTelegramBot:
         return "\n".join(lines)
 
     def get_welcome_message(self, resident_name: str | None = None) -> str:
-        """Concise, professional resident concierge welcome message without emojis."""
+        """Ultra-concise, executive resident concierge welcome message."""
         salutation = f", {resident_name}" if resident_name else ""
         return (
-            f"*ESTATE MANAGEMENT & RESIDENT CONCIERGE*\n\n"
+            f"*{CONDO_NAME.upper()} · MCST {MCST_NO}*\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
             f"Good day{salutation}.\n\n"
-            f"Welcome to the Estate Resident Concierge. Available 24/7 to assist with:\n"
-            f"• Maintenance & repair requests\n"
-            f"• Facility enquiries & estate bylaws Q&A (RAG Knowledge Base)\n"
-            f"• Security & estate incidents\n"
-            f"• Work order creation & tracking\n"
-            f"• Emergency contacts\n\n"
-            f"*Ask a Question (Instant Answers):*\n"
-            f"Type any enquiry directly into the chat, for example:\n"
-            f"  • _\"What are the swimming pool hours?\"_\n"
-            f"  • _\"How do I book the BBQ pit?\"_\n"
-            f"  • _\"What are visitor parking rates?\"_\n"
-            f"  • _\"What are permitted renovation hours?\"_\n\n"
-            f"*Report an Issue:*\n"
-            f"Provide a brief description of the issue and your unit number or location.\n"
-            f"Photos and videos can be attached directly.\n\n"
-            f"*Available Commands:*\n"
-            f"`/faq` — Browse estate rules & facility information\n"
-            f"`/report <issue>` — Submit an issue\n"
-            f"`/status [id]` — Check work order status\n"
-            f"`/myrequests` — View active and resolved requests\n"
-            f"`/emergency` — Security & emergency contacts\n"
-            f"`/help` — Concierge services\n\n"
-            f"How may I assist you today?"
+            f"Welcome to your 24/7 Resident Concierge.\n"
+            f"Report an issue, ask about facilities, or attach a photo to begin.\n\n"
+            f"How may we assist you today?"
         )
 
-    def get_resident_reply_keyboard(self) -> Any:
-        """Persistent 4-button quick action mobile keyboard for residents."""
+    def get_resident_welcome_markup(self) -> Any:
+        """Clear any persistent custom keyboard buttons to keep native clean chat input."""
         try:
-            from telegram import KeyboardButton, ReplyKeyboardMarkup
+            from telegram import ReplyKeyboardRemove
+            return ReplyKeyboardRemove()
+        except Exception:
+            return None
 
-            buttons = [
-                [KeyboardButton("🛠️ Report Issue"), KeyboardButton("❓ FAQ & Bylaws")],
-                [KeyboardButton("📋 My Requests"), KeyboardButton("🚨 Emergency Hotlines")],
-            ]
-            return ReplyKeyboardMarkup(
-                buttons,
-                resize_keyboard=True,
-                is_persistent=True,
-                input_field_placeholder="Report an issue or ask a question...",
-            )
+    def get_resident_reply_keyboard(self) -> Any:
+        """Clear any persistent custom keyboard buttons to keep native clean chat input."""
+        try:
+            from telegram import ReplyKeyboardRemove
+            return ReplyKeyboardRemove()
         except Exception:
             return None
 
@@ -630,6 +612,7 @@ class CondoManagementTelegramBot:
                 logger.warning(f"Could not fetch bot identity: {exc}")
 
             commands = [
+                BotCommand("new", "Log a new maintenance request or issue"),
                 BotCommand("report", "Report a maintenance or security issue"),
                 BotCommand("faq", "Estate bylaws, facilities & rules Q&A"),
                 BotCommand("status", "Check the live progress of your work order"),
@@ -657,17 +640,33 @@ class CondoManagementTelegramBot:
         async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             user = update.effective_user
             user_name = user.first_name if user else None
+            welcome_text = self.get_welcome_message(user_name)
+            hero_path = Path(__file__).resolve().parent.parent / "output" / "hero" / "condo-bg-editorial.jpg"
+
+            if hero_path.exists():
+                try:
+                    with open(hero_path, "rb") as photo_file:
+                        await update.message.reply_photo(
+                            photo=photo_file,
+                            caption=welcome_text,
+                            parse_mode=ParseMode.MARKDOWN,
+                            reply_markup=self.get_resident_welcome_markup(),
+                        )
+                        return
+                except Exception as exc:
+                    logger.warning(f"Failed to send welcome hero banner: {exc}")
+
             await update.message.reply_text(
-                self.get_welcome_message(user_name),
+                welcome_text,
                 parse_mode=ParseMode.MARKDOWN,
-                reply_markup=self.get_resident_reply_keyboard(),
+                reply_markup=self.get_resident_welcome_markup(),
             )
 
         async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             await update.message.reply_text(
                 self.get_welcome_message(),
                 parse_mode=ParseMode.MARKDOWN,
-                reply_markup=self.get_resident_reply_keyboard(),
+                reply_markup=self.get_resident_welcome_markup(),
             )
 
         async def faq_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -711,7 +710,7 @@ class CondoManagementTelegramBot:
             await update.message.reply_text(
                 self.get_emergency_message(),
                 parse_mode=ParseMode.MARKDOWN,
-                reply_markup=self.get_resident_reply_keyboard(),
+                reply_markup=self.get_resident_welcome_markup(),
             )
 
         async def staff_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1049,12 +1048,13 @@ class CondoManagementTelegramBot:
 
         async def myrequests_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             res_id = str(update.effective_user.id if update.effective_user else "unknown")
-            text, orders = self.handle_my_requests(res_id)
+            orders = self.store.list_for_resident(res_id)
+            text = self.handle_my_requests(res_id)
             if not orders:
                 await update.message.reply_text(
                     text,
                     parse_mode=ParseMode.MARKDOWN,
-                    reply_markup=self.get_resident_reply_keyboard(),
+                    reply_markup=self.get_resident_welcome_markup(),
                 )
                 return
 
@@ -1069,14 +1069,12 @@ class CondoManagementTelegramBot:
         async def report_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             if not context.args:
                 await update.message.reply_text(
-                    "*REPORT AN ESTATE DEFECT / ISSUE*\n"
+                    "*LOG A NEW ISSUE / REQUEST*\n"
                     "──────────────────────────────\n"
-                    "Please describe your issue after `/report` or type it directly:\n"
-                    "• _\"Water leaking from pipe at #05-12\"_\n"
-                    "• _\"Lift B is stuck on level 3\"_\n\n"
-                    "📷 *Tip:* You can also send a photo directly with your description as a caption!",
+                    "Please state your issue and unit number (e.g. `/new Water leaking at #08-14`), or describe it directly.\n\n"
+                    "• *Tip:* You can also send a photo directly with your description as a caption!",
                     parse_mode=ParseMode.MARKDOWN,
-                    reply_markup=self.get_resident_reply_keyboard(),
+                    reply_markup=self.get_resident_welcome_markup(),
                 )
                 return
             full_text = " ".join(context.args)
@@ -1094,7 +1092,10 @@ class CondoManagementTelegramBot:
                 art_res = get_article_by_id(art_id)
                 if art_res:
                     back_markup = InlineKeyboardMarkup([
-                        [InlineKeyboardButton("« Back to FAQ Topics", callback_data="faq:menu")]
+                        [
+                            InlineKeyboardButton("« Back to FAQ Topics", callback_data="nav:faq"),
+                            InlineKeyboardButton("Main Menu", callback_data="nav:welcome"),
+                        ]
                     ])
                     await query.edit_message_text(
                         art_res["reply"],
@@ -1103,7 +1104,7 @@ class CondoManagementTelegramBot:
                     )
                 return
 
-            if data == "faq:menu":
+            if data in ("faq:menu", "nav:faq"):
                 buttons = [
                     [
                         InlineKeyboardButton("Pool & Gym Hours", callback_data="faq:art:FAC-POOL"),
@@ -1125,6 +1126,9 @@ class CondoManagementTelegramBot:
                         InlineKeyboardButton("Parcel Lockers", callback_data="faq:art:PARCEL-LOCKER"),
                         InlineKeyboardButton("Office & Guardhouse", callback_data="faq:art:OFFICE-CONTACT"),
                     ],
+                    [
+                        InlineKeyboardButton("« Back to Main Menu", callback_data="nav:welcome"),
+                    ],
                 ]
                 await query.edit_message_text(
                     "*ESTATE KNOWLEDGE BASE & RESIDENT FAQ*\n"
@@ -1136,6 +1140,44 @@ class CondoManagementTelegramBot:
                     "• _\"Can contractors drill on Saturday?\"_",
                     parse_mode=ParseMode.MARKDOWN,
                     reply_markup=InlineKeyboardMarkup(buttons),
+                )
+                return
+
+            if data == "nav:myrequests":
+                orders = self.store.list_for_resident(res_id)
+                text = self.handle_my_requests(res_id)
+                keyboard = []
+                for wo in orders[:5]:
+                    keyboard.append([
+                        InlineKeyboardButton(f"Inspect {wo.work_order_id}", callback_data=f"status:{wo.work_order_id}")
+                    ])
+                keyboard.append([
+                    InlineKeyboardButton("« Back to Main Menu", callback_data="nav:welcome")
+                ])
+                await query.edit_message_text(
+                    text,
+                    reply_markup=InlineKeyboardMarkup(keyboard),
+                    parse_mode=ParseMode.MARKDOWN,
+                )
+                return
+
+            if data == "nav:emergency":
+                keyboard = [
+                    [InlineKeyboardButton("« Back to Main Menu", callback_data="nav:welcome")]
+                ]
+                await query.edit_message_text(
+                    self.get_emergency_message(),
+                    reply_markup=InlineKeyboardMarkup(keyboard),
+                    parse_mode=ParseMode.MARKDOWN,
+                )
+                return
+
+            if data == "nav:welcome":
+                user_name = user.first_name if user else None
+                await query.edit_message_text(
+                    self.get_welcome_message(user_name),
+                    reply_markup=self.get_resident_welcome_markup(),
+                    parse_mode=ParseMode.MARKDOWN,
                 )
                 return
 
@@ -1204,7 +1246,8 @@ class CondoManagementTelegramBot:
                 ]
                 await query.edit_message_text(
                     f"*Work Order `#{wo_id}` is officially closed.*\n\n"
-                    f"Thank you for confirming resolution. How would you rate the speed and quality of our service?",
+                    f"Thank you for confirming resolution. How would you rate the speed and quality of our service?\n\n"
+                    f"_Whenever you need to make a new report or inquiry, simply type `/new` anytime._",
                     reply_markup=InlineKeyboardMarkup(rating_keyboard),
                     parse_mode=ParseMode.MARKDOWN,
                 )
@@ -1212,13 +1255,32 @@ class CondoManagementTelegramBot:
                 parts = data.split(":")
                 wo_id = parts[1]
                 stars = int(parts[2])
-                self.store.record_feedback(wo_id, rating=stars)
+                updated_wo = self.store.record_feedback(wo_id, rating=stars)
                 await query.edit_message_text(
                     f"*Rating Received:* {stars} / 5 Stars\n\n"
                     f"Thank you for your feedback on Work Order `#{wo_id}`. "
-                    f"Your rating helps our estate management team maintain high community standards.",
+                    f"Your rating helps our estate management team maintain high community standards.\n\n"
+                    f"──────────────────────────────\n"
+                    f"Whenever you want to submit a new report or inquiry, you can type `/new` or send a message anytime.",
                     parse_mode=ParseMode.MARKDOWN,
                 )
+                if self.staff_chat_id and updated_wo:
+                    res_name = updated_wo.resident_name or (f"@{updated_wo.resident_username}" if updated_wo.resident_username else "Resident")
+                    staff_alert = (
+                        f"*[RESIDENT SERVICE RATING RECEIVED]*\n"
+                        f"──────────────────────────────\n"
+                        f"• *Ticket:* `#{updated_wo.work_order_id}`\n"
+                        f"• *Rating:* {stars} / 5 Stars\n"
+                        f"• *Resident:* {res_name}\n"
+                        f"• *Department:* {updated_wo.category_title}\n"
+                        f"• *Location:* `{updated_wo.location or 'Estate Common Area'}`"
+                    )
+                    await self._dispatch_to_staff(
+                        context=context,
+                        text=staff_alert,
+                        category=updated_wo.category,
+                        priority=Priority.HIGH if stars <= 2 else Priority.LOW,
+                    )
             elif data.startswith("clean_bbq:"):
                 parts = data.split(":")
                 wo_id = parts[1]
@@ -1284,7 +1346,8 @@ class CondoManagementTelegramBot:
                         f"has been dispatched to our **{updated_wo.assigned_team}** for prompt attention.\n\n"
                         f"• *Priority:* {updated_wo.priority.value.upper()} (Estimated SLA: {updated_wo.sla_target})\n"
                         f"• *Status:* In Progress\n\n"
-                        f"For urgent on-site assistance, please contact the 24/7 Guardhouse at `+65 6789 0123`."
+                        f"• Track live status: `/status {updated_wo.work_order_id}`\n"
+                        f"• Make another report: `/new`"
                     )
                     await query.edit_message_text(
                         reply_msg_text,
@@ -1766,10 +1829,10 @@ class CondoManagementTelegramBot:
                     if len(clean_text.split()) <= 4 or re.search(r"\b(fix|check|report|lodge|help|look into|attend|this)\b", clean_text, re.IGNORECASE):
                         clean_text = f"{replied_text} ({clean_text})" if clean_text else replied_text
 
-            # 1.5 Check for persistent 4-button quick action mobile keyboard
+            # 1.5 Check for resident quick action buttons
             clean_btn = clean_text.strip().lower()
 
-            # Button 1: Report Issue
+            # Button: Report Issue (legacy fallback)
             if clean_btn in (
                 "🛠️ report issue",
                 "🛠 report issue",
@@ -1787,25 +1850,31 @@ class CondoManagementTelegramBot:
                     "• _\"Car parked across two lots at B2 near Lot 104\"_\n\n"
                     "📷 *Photo Evidence:* You can also snap or attach a photo directly with your description as the caption!",
                     parse_mode=ParseMode.MARKDOWN,
-                    reply_markup=self.get_resident_reply_keyboard(),
+                    reply_markup=self.get_resident_welcome_markup(),
                 )
                 return
 
-            # Button 2: FAQ & Bylaws
+            # Button: FAQ & Bylaws
             if clean_btn in (
-                "❓ faq & bylaws",
+                "faqs & bylaws",
                 "faq & bylaws",
-                "❓ faq",
+                "faqs",
                 "faq",
+                "📖 faq & bylaws",
+                "📖 faq",
+                "📖 estate faq",
+                "❓ faq & bylaws",
+                "❓ faq",
                 "condo faq & bylaws",
                 "faq / bylaws",
                 "condo faq",
                 "bylaws",
+                "estate faq",
             ):
                 await faq_cmd(update, context)
                 return
 
-            # Button 3: My Requests
+            # Button: My Requests
             if clean_btn in (
                 "📋 my requests",
                 "my requests",
@@ -1817,31 +1886,28 @@ class CondoManagementTelegramBot:
                 await myrequests_cmd(update, context)
                 return
 
-            # Button 4: Emergency Hotlines
+            # Button: Emergency Hotlines
             if clean_btn in (
+                "🚨 24/7 emergency hotlines",
+                "24/7 emergency hotlines",
                 "🚨 emergency hotlines",
                 "emergency hotlines",
                 "🚨 hotlines",
                 "hotlines",
                 "emergency contacts",
                 "emergency",
+                "🚨 emergency",
             ):
                 await emergency_cmd(update, context)
                 return
 
             # 2. Check if text is just a mention / greeting
             if not clean_text or clean_text.lower() in ("hi", "hello", "hey", "help", "@"):
-                user_name = f", {user.first_name}" if user and user.first_name else ""
+                user_name = user.first_name if user else None
                 await update.message.reply_text(
-                    f"*ESTATE MANAGEMENT & RESIDENT CONCIERGE*\n\n"
-                    f"Good day{user_name}.\n\n"
-                    f"How may I assist you today? You can report an issue by describing what happened and providing your unit or location.\n\n"
-                    f"• Report issue: `/report <issue>`\n"
-                    f"• Track request: `/status [id]`\n"
-                    f"• View your requests: `/myrequests`\n"
-                    f"• Emergency contacts: `/emergency`",
+                    self.get_welcome_message(user_name),
                     parse_mode=ParseMode.MARKDOWN,
-                    reply_markup=self.get_resident_reply_keyboard(),
+                    reply_markup=self.get_resident_welcome_markup(),
                 )
                 return
 
@@ -1871,10 +1937,21 @@ class CondoManagementTelegramBot:
                     )
                     return
                 elif re.search(r"\b(team|leave|fine|ok|okay|all good|no|thanks|thank you)\b", clean_text, re.IGNORECASE):
+                    rating_keyboard = [
+                        [
+                            InlineKeyboardButton("1 Star", callback_data=f"rate:{wo_id}:1"),
+                            InlineKeyboardButton("2 Stars", callback_data=f"rate:{wo_id}:2"),
+                            InlineKeyboardButton("3 Stars", callback_data=f"rate:{wo_id}:3"),
+                            InlineKeyboardButton("4 Stars", callback_data=f"rate:{wo_id}:4"),
+                            InlineKeyboardButton("5 Stars", callback_data=f"rate:{wo_id}:5"),
+                        ]
+                    ]
                     await update.message.reply_text(
                         f"Thank you. Our duty team has taken charge of Work Order `#{wo_id}`. "
                         f"You can check real-time progress anytime via `/status {wo_id}`.\n\n"
-                        f"Have a pleasant day ahead.",
+                        f"How would you rate our concierge service today?\n\n"
+                        f"_Whenever you need to make a new report, simply type `/new` or send a message anytime._",
+                        reply_markup=InlineKeyboardMarkup(rating_keyboard),
                         parse_mode=ParseMode.MARKDOWN,
                     )
                     return
@@ -1968,17 +2045,18 @@ class CondoManagementTelegramBot:
                     self.session_store.set_pending_location(res_id, wo.work_order_id)
                     self._pending_location_requests[res_id] = wo.work_order_id
                     noise_loc_dict = build_quick_location_markup(wo.work_order_id, is_noise=True)
-                    noise_loc_markup = InlineKeyboardMarkup([
+                    noise_inline_rows = [
                         [InlineKeyboardButton(btn["text"], callback_data=btn["callback_data"]) for btn in row]
                         for row in noise_loc_dict.get("inline_keyboard", [])
-                    ])
+                    ]
+                    noise_loc_markup = InlineKeyboardMarkup(noise_inline_rows) if noise_inline_rows else None
                     await update.message.reply_text(
                         f"*NOISE DISTURBANCE REPORT REGISTERED*\n\n"
                         f"We have registered your noise report: \"{wo.text}\"\n\n"
                         f"• *Reference:* `#{wo.work_order_id}`\n"
                         f"• *Team:* {wo.assigned_team}\n"
                         f"• *Status:* Location Details Required\n\n"
-                        f"Please reply with the specific unit or block where the disturbance is occurring (e.g. `Block C, #08-12`), or tap a location below.\n\n"
+                        f"Please reply with the specific unit or block where the disturbance is occurring (e.g. `Block C, #08-12`).\n\n"
                         f"{format_estate_levels_clarification()}\n\n"
                         f"Once provided, your report will be dispatched immediately to our on-duty security patrol.",
                         reply_markup=noise_loc_markup,
@@ -2055,7 +2133,8 @@ class CondoManagementTelegramBot:
                         f"has been dispatched to our **{updated_wo.assigned_team}** for prompt attention.\n\n"
                         f"• *Priority:* {updated_wo.priority.value.upper()} (Estimated SLA: {updated_wo.sla_target})\n"
                         f"• *Status:* In Progress\n\n"
-                        f"For urgent on-site assistance, please contact the 24/7 Guardhouse at `+65 6789 0123`."
+                        f"• Track live status: `/status {updated_wo.work_order_id}`\n"
+                        f"• Make another report: `/new`"
                     )
                     await update.message.reply_text(
                         reply_msg_text,
@@ -2080,18 +2159,29 @@ class CondoManagementTelegramBot:
             if _is_conversational_reply(clean_text):
                 last_wo_id = self.session_store.get_last_work_order(res_id)
                 clean_norm = re.sub(r"[^\w\s]", "", clean_text.strip().lower())
-                if clean_norm in ("ok", "okay", "k", "noted", "got it", "thanks", "thank you", "thx", "sure", "alright", "good"):
+                if clean_norm in ("ok", "okay", "k", "noted", "got it", "thanks", "thank you", "thx", "sure", "alright", "good", "bye", "goodbye"):
                     if last_wo_id:
                         self.store.update_status(last_wo_id, self.store.get(last_wo_id).status if self.store.get(last_wo_id) else "In Progress", note=f"Resident acknowledged: \"{clean_text.strip()}\"", notify_resident=False)
+                        rating_keyboard = [
+                            [
+                                InlineKeyboardButton("1 Star", callback_data=f"rate:{last_wo_id}:1"),
+                                InlineKeyboardButton("2 Stars", callback_data=f"rate:{last_wo_id}:2"),
+                                InlineKeyboardButton("3 Stars", callback_data=f"rate:{last_wo_id}:3"),
+                                InlineKeyboardButton("4 Stars", callback_data=f"rate:{last_wo_id}:4"),
+                                InlineKeyboardButton("5 Stars", callback_data=f"rate:{last_wo_id}:5"),
+                            ]
+                        ]
                         await update.message.reply_text(
-                            f"You are welcome. We are monitoring Work Order `#{last_wo_id}`. "
-                            f"Feel free to check status anytime with `/status` or reply if you need anything else.",
+                            f"You are most welcome. Our duty team is attending to Work Order `#{last_wo_id}`.\n\n"
+                            f"How would you rate our concierge service today?\n\n"
+                            f"_Whenever you need to make a new report or inquiry, simply type `/new` or send a message anytime._",
+                            reply_markup=InlineKeyboardMarkup(rating_keyboard),
                             parse_mode=ParseMode.MARKDOWN,
                         )
                     else:
                         await update.message.reply_text(
-                            "You are welcome. How may our estate team assist you today?\n"
-                            "Type `/report <issue>` or describe what you need assistance with.",
+                            "You are most welcome! How may our estate management team assist you today?\n\n"
+                            "_Whenever you need to make a new report or inquiry, simply type `/new` or describe it here anytime._",
                             parse_mode=ParseMode.MARKDOWN,
                         )
                     return
@@ -2211,27 +2301,16 @@ class CondoManagementTelegramBot:
                         self.session_store.set_pending_location(res_id, wo.work_order_id)
                         self._pending_location_requests[res_id] = wo.work_order_id
 
-                        bbq_keyboard = [
-                            [
-                                InlineKeyboardButton("BBQ Pit 1", callback_data=f"clean_bbq:{wo.work_order_id}:1"),
-                                InlineKeyboardButton("BBQ Pit 2", callback_data=f"clean_bbq:{wo.work_order_id}:2"),
-                            ],
-                            [
-                                InlineKeyboardButton("BBQ Pit 3", callback_data=f"clean_bbq:{wo.work_order_id}:3"),
-                                InlineKeyboardButton("BBQ Pit 4", callback_data=f"clean_bbq:{wo.work_order_id}:4"),
-                            ],
-                        ]
                         reply_text = (
                             f"*BBQ Pit Cleanliness & Deposit Notice*\n"
                             f"──────────────────────────────\n"
                             f"• The previous user's $50 cleaning deposit will be forfeited following CCTV and booking log review.\n"
                             f"• Our on-duty cleaners will be dispatched immediately to clean and sanitize the pit for your session.\n\n"
                             f"*Which BBQ Pit are you currently at?*\n"
-                            f"Tap below to dispatch our cleaners:"
+                            f"Please reply with your BBQ pit number (e.g. `Pit 1` to `4`) to dispatch our cleaners."
                         )
                         await update.message.reply_text(
                             reply_text,
-                            reply_markup=InlineKeyboardMarkup(bbq_keyboard),
                             parse_mode=ParseMode.MARKDOWN,
                         )
                         return
@@ -2327,17 +2406,18 @@ class CondoManagementTelegramBot:
                     self.session_store.set_pending_location(res_id, wo.work_order_id)
                     self._pending_location_requests[res_id] = wo.work_order_id
                     loc_dict = build_quick_location_markup(wo.work_order_id, is_noise=False)
-                    loc_markup = InlineKeyboardMarkup([
+                    loc_inline_rows = [
                         [InlineKeyboardButton(btn["text"], callback_data=btn["callback_data"]) for btn in row]
                         for row in loc_dict.get("inline_keyboard", [])
-                    ])
+                    ]
+                    loc_markup = InlineKeyboardMarkup(loc_inline_rows) if loc_inline_rows else None
                     loc_prompt = (
                         f"*MAINTENANCE REPORT REGISTERED*\n\n"
                         f"We have registered your issue: \"{wo.text}\"\n\n"
                         f"• *Reference:* `#{wo.work_order_id}`\n"
                         f"• *Assigned Team:* {wo.assigned_team}\n"
                         f"• *Status:* Location Details Required\n\n"
-                        f"Please reply with your unit or block number (e.g. `Block B, #08-14` or `Clubhouse Level 2`), or tap a common facility below.\n\n"
+                        f"Please reply with your unit or block number (e.g. `Block B, #08-14` or `Clubhouse Level 2`).\n\n"
                         f"{format_estate_levels_clarification()}\n\n"
                         f"Once you provide your location, this ticket will be dispatched immediately to our on-duty team."
                     )
@@ -2394,6 +2474,9 @@ class CondoManagementTelegramBot:
         app.add_handler(CommandHandler("myrequests", myrequests_cmd))
         app.add_handler(CommandHandler("myworkorders", myrequests_cmd))
         app.add_handler(CommandHandler("report", report_cmd))
+        app.add_handler(CommandHandler("new", report_cmd))
+        app.add_handler(CommandHandler("newticket", report_cmd))
+        app.add_handler(CommandHandler("ticket", report_cmd))
         app.add_handler(CommandHandler("staff", staff_cmd))
         app.add_handler(CommandHandler("pending", pending_cmd))
         app.add_handler(CommandHandler("techs", techs_cmd))
@@ -2539,12 +2622,25 @@ def run_interactive_cli() -> None:
             query = line.replace("/status", "").strip()
             print("\n" + bot.handle_status_query(query or "WO-EST-1044"))
         elif line == "/myrequests":
-            text, _ = bot.handle_my_requests(user_id)
+            text = bot.handle_my_requests(user_id)
             print("\n" + text)
         elif line == "/emergency":
             print("\n" + bot.get_emergency_message())
         elif line == "/staff":
             print("\n" + bot.get_staff_dashboard())
+        elif line.startswith("/new") or line.startswith("/report"):
+            content = re.sub(r"^/(newticket|ticket|new|report)\s*", "", line).strip()
+            if not content:
+                print("\nPlease provide your issue after /new (e.g. /new Water leaking at #08-14)")
+            else:
+                wo, card = bot.process_resident_report(
+                    text=content,
+                    resident_id=user_id,
+                    resident_username="cli_resident",
+                    resident_name="Resident Tester",
+                )
+                print("\n[Bot Telegram Response]:")
+                print(card)
         else:
             wo, card = bot.process_resident_report(
                 text=line,
