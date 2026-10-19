@@ -661,3 +661,32 @@ def test_estate_carpark_map_asset_exists():
     assert map_path.exists(), f"Expected carpark map at {map_path}"
     assert map_path.stat().st_size > 5000, "Carpark map file should be a valid non-empty image"
 
+
+def test_carpark_ambiguity_two_step_clarification(temp_store: WorkOrderStore, triage_service: JevTriageService):
+    from condo_jev.telegram_bot import CondoManagementTelegramBot
+    from condo_jev.estate_directory import is_ambiguous_carpark_location
+
+    bot = CondoManagementTelegramBot(
+        triage_service=triage_service,
+        work_order_store=temp_store,
+    )
+
+    # Step 1: Resident says "there's a water leak" (generic, no location)
+    wo, card = bot.process_resident_report(
+        text="there's a water leak",
+        resident_id="user_cp_step",
+        resident_username="tester",
+    )
+    assert bot.session_store.get_session("user_cp_step").get("pending_location_wo_id") == wo.work_order_id
+
+    # Step 2: Resident replies "carpark" -> Still ambiguous!
+    reply_step2 = "carpark"
+    assert is_ambiguous_carpark_location(reply_step2) is True
+
+    # Step 3: Resident specifies "Basement 1 near Lot 42" -> Concrete!
+    reply_step3 = "Basement 1 near Lot 42"
+    assert is_ambiguous_carpark_location(reply_step3) is False
+    updated = bot.store.update_location(wo.work_order_id, reply_step3)
+    assert updated is not None
+    assert updated.location == "Basement 1 near Lot 42"
+

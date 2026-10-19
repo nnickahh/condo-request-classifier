@@ -2131,6 +2131,35 @@ class CondoManagementTelegramBot:
                     m = re.match(r"^pit\s*([1-4])$", clean_loc, re.IGNORECASE)
                     clean_loc = f"BBQ Pit {m.group(1)}"
 
+                # Check if resident replied with ambiguous carpark (e.g. "carpark" or "in carpark")
+                if is_ambiguous_carpark_location(clean_loc):
+                    carpark_map_path = Path(__file__).resolve().parent.parent / "output" / "estate_carpark_map.jpg"
+                    carpark_prompt = (
+                        f"*CARPARK LEVEL & LOCATION REQUIRED*\n"
+                        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                        f"Our estate has multiple underground carpark levels:\n"
+                        f"• *Basement 1 (B1):* Visitor Lots (V01–V20), EV Charging, Resident Lots #01–#80\n"
+                        f"• *Basement 2 (B2):* Resident Season Lots #81–#180, Car Wash Bay\n\n"
+                        f"Please check the carpark directory map above and reply with:\n"
+                        f"1. *Level:* **B1** or **B2**\n"
+                        f"2. *Pillar or Lot Number:* (e.g. `B1 near Lot 42` or `B2 near Pillar BB3`)\n\n"
+                        f"Once provided, our team will be dispatched directly to the exact spot."
+                    )
+                    if carpark_map_path.exists():
+                        try:
+                            with open(carpark_map_path, "rb") as map_file:
+                                await update.message.reply_photo(
+                                    photo=map_file,
+                                    caption=carpark_prompt,
+                                    parse_mode=ParseMode.MARKDOWN,
+                                )
+                                return
+                        except Exception as exc:
+                            logger.warning(f"Failed to send carpark directory photo: {exc}")
+
+                    await update.message.reply_text(carpark_prompt, parse_mode=ParseMode.MARKDOWN)
+                    return
+
                 val_res = validate_estate_location(clean_loc)
                 if not val_res.is_valid:
                     await update.message.reply_text(val_res.error_message, parse_mode=ParseMode.MARKDOWN)
