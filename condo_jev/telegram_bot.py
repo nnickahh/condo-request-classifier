@@ -402,16 +402,17 @@ class CondoManagementTelegramBot:
         return "\n".join(lines)
 
     def get_welcome_message(self, resident_name: str | None = None) -> str:
-        """Concise, professional 24/7 resident concierge greeting."""
+        """Executive, professional 24/7 resident concierge greeting."""
         salutation = f", {resident_name}" if resident_name else ""
         return (
-            f"*{CONDO_NAME} · MCST {MCST_NO}*\n"
-            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"Good day{salutation}! Welcome to your 24/7 Resident Concierge.\n\n"
-            f"Simply type a message or send a photo to:\n"
-            f"• *Report an issue* with your unit or location (e.g. _\"Corridor light flickering outside #05-12\"_)\n"
-            f"• *Ask estate questions* (e.g. pool hours, BBQ booking, visitor parking)\n\n"
-            f"How may we assist you today?"
+            f"*{CONDO_NAME}*\n"
+            f"*Resident Concierge Desk*\n\n"
+            f"Good day{salutation}.\n\n"
+            f"Welcome to your 24/7 Estate Concierge. How may our management team assist you today?\n\n"
+            f"You may send a message or attach a photo directly to:\n"
+            f"• *Report an estate defect or repair* (e.g. _\"Corridor light flickering outside #05-12\"_)\n"
+            f"• *Enquire about estate facilities* (e.g. pool hours, BBQ booking, visitor parking)\n\n"
+            f"To check on your existing requests at any time, type `/status`."
         )
 
     def get_resident_welcome_markup(self) -> Any:
