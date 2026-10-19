@@ -28,6 +28,7 @@ from condo_jev.estate_directory import (
     extract_noise_details,
     format_estate_levels_clarification,
     format_noise_clarification_prompt,
+    is_ambiguous_carpark_location,
     is_concrete_estate_location,
     is_noise_complaint,
     validate_estate_location,
@@ -72,11 +73,12 @@ def _is_probable_location(text: str) -> bool:
     clean = text.strip()
     if len(clean) > 80:
         return False
-    # Patterns like #05-12, 08-14, #12-34, Blk B, Tower 2, Level 3, Gym, Basement
+    # Patterns like #05-12, 08-14, #12-34, Blk B, Tower 2, Level 3, Gym, Basement, B1, Pillar
     loc_patterns = [
         r"#?[B0-9]{1,2}[-\s]\d{1,4}",
-        r"(?i)\b(block|blk|tower|lobby|level|lvl|floor|unit|apt|b\d|lot|gym|pool|carpark|chute|pit|bbq|pavilion|court)\b",
+        r"(?i)\b(block|blk|tower|lobby|level|lvl|floor|unit|apt|b\d|lot|pillar|basement|gym|pool|carpark|chute|pit|bbq|pavilion|court)\b",
         r"^[1-4]$",
+        r"(?i)^b[12]$",
     ]
     return any(re.search(p, clean) for p in loc_patterns)
 
@@ -2039,7 +2041,36 @@ class CondoManagementTelegramBot:
                 has_loc = is_concrete_estate_location(wo.location, combined_report)
                 if not has_loc:
                     self.session_store.set_pending_location(res_id, wo.work_order_id)
-                    self._pending_location_requests[res_id] = wo.work_order_id
+                    if is_ambiguous_carpark_location(wo.location, combined_report):
+                        carpark_map_path = Path(__file__).resolve().parent.parent / "output" / "estate_carpark_map.jpg"
+                        carpark_prompt = (
+                            f"*CARPARK LEVEL REQUIRED FOR NOISE PATROL*\n"
+                            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                            f"We have registered your noise report: \"{wo.text}\"\n\n"
+                            f"• *Reference:* `#{wo.work_order_id}`\n"
+                            f"• *Team:* {wo.assigned_team}\n"
+                            f"• *Status:* Carpark Location Details Required\n\n"
+                            f"Our estate has multiple underground carpark levels (**Basement 1** & **Basement 2**).\n\n"
+                            f"Please check the attached directory map and reply with:\n"
+                            f"1. *Level:* **B1** or **B2**\n"
+                            f"2. *Pillar / Lot / Lobby:* (e.g. `B1 near Lot 20` or `B2 Tower B Lobby`)\n\n"
+                            f"Once provided, our security patrol will be dispatched immediately to investigate."
+                        )
+                        if carpark_map_path.exists():
+                            try:
+                                with open(carpark_map_path, "rb") as map_file:
+                                    await update.message.reply_photo(
+                                        photo=map_file,
+                                        caption=carpark_prompt,
+                                        parse_mode=ParseMode.MARKDOWN,
+                                    )
+                                    return
+                            except Exception as exc:
+                                logger.warning(f"Failed to send carpark directory photo: {exc}")
+
+                        await update.message.reply_text(carpark_prompt, parse_mode=ParseMode.MARKDOWN)
+                        return
+
                     noise_loc_dict = build_quick_location_markup(wo.work_order_id, is_noise=True)
                     noise_inline_rows = [
                         [InlineKeyboardButton(btn["text"], callback_data=btn["callback_data"]) for btn in row]
@@ -2401,6 +2432,40 @@ class CondoManagementTelegramBot:
                 if not has_loc:
                     self.session_store.set_pending_location(res_id, wo.work_order_id)
                     self._pending_location_requests[res_id] = wo.work_order_id
+
+                    # Check if carpark is mentioned without specific level / lot
+                    if is_ambiguous_carpark_location(wo.location, text_body):
+                        carpark_map_path = Path(__file__).resolve().parent.parent / "output" / "estate_carpark_map.jpg"
+                        carpark_prompt = (
+                            f"*CARPARK LEVEL & LOCATION REQUIRED*\n"
+                            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                            f"We have registered your issue: \"{wo.text}\"\n\n"
+                            f"• *Reference:* `#{wo.work_order_id}`\n"
+                            f"• *Assigned Team:* {wo.assigned_team}\n"
+                            f"• *Status:* Carpark Location Details Required\n\n"
+                            f"Our estate has multiple underground carpark levels:\n"
+                            f"• *Basement 1 (B1):* Visitor Lots (V01–V20), EV Charging, Resident Lots #01–#80\n"
+                            f"• *Basement 2 (B2):* Resident Season Lots #81–#180, Car Wash Bay\n\n"
+                            f"Please check the carpark directory map above and reply with:\n"
+                            f"1. *Level:* **B1** or **B2**\n"
+                            f"2. *Pillar or Lot Number:* (e.g. `B1 near Lot 42` or `B2 near Pillar BB3`)\n\n"
+                            f"Once provided, our team will be dispatched directly to the exact spot."
+                        )
+                        if carpark_map_path.exists():
+                            try:
+                                with open(carpark_map_path, "rb") as map_file:
+                                    await update.message.reply_photo(
+                                        photo=map_file,
+                                        caption=carpark_prompt,
+                                        parse_mode=ParseMode.MARKDOWN,
+                                    )
+                                    return
+                            except Exception as exc:
+                                logger.warning(f"Failed to send carpark directory photo: {exc}")
+
+                        await update.message.reply_text(carpark_prompt, parse_mode=ParseMode.MARKDOWN)
+                        return
+
                     loc_dict = build_quick_location_markup(wo.work_order_id, is_noise=False)
                     loc_inline_rows = [
                         [InlineKeyboardButton(btn["text"], callback_data=btn["callback_data"]) for btn in row]

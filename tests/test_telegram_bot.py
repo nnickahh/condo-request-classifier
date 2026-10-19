@@ -637,9 +637,27 @@ def test_resident_service_review_and_status_display(temp_store: WorkOrderStore, 
     assert updated_num.resident_feedback_rating == 4
 
 
+def test_is_ambiguous_carpark_location():
+    from condo_jev.estate_directory import is_ambiguous_carpark_location, is_concrete_estate_location
+
+    # Ambiguous carpark mentions (requires B1/B2 clarification)
+    assert is_ambiguous_carpark_location(None, "there is a water leak in the carpark") is True
+    assert is_ambiguous_carpark_location("carpark", "oil spill on the floor") is True
+    assert is_ambiguous_carpark_location(None, "car park light broken") is True
+    assert is_concrete_estate_location(None, "there is a water leak in the carpark") is False
+
+    # Concrete carpark mentions with level, lot, or pillar
+    assert is_ambiguous_carpark_location(None, "water leak at carpark B1") is False
+    assert is_ambiguous_carpark_location("B2", "oil spill on the floor") is False
+    assert is_ambiguous_carpark_location(None, "carpark basement 1 flooded") is False
+    assert is_ambiguous_carpark_location(None, "car parked at Lot 42") is False
+    assert is_ambiguous_carpark_location(None, "carpark near Pillar BB3") is False
+    assert is_concrete_estate_location(None, "water leak at carpark B1") is True
 
 
-
-
-
+def test_estate_carpark_map_asset_exists():
+    from pathlib import Path
+    map_path = Path(__file__).resolve().parent.parent / "output" / "estate_carpark_map.jpg"
+    assert map_path.exists(), f"Expected carpark map at {map_path}"
+    assert map_path.stat().st_size > 5000, "Carpark map file should be a valid non-empty image"
 

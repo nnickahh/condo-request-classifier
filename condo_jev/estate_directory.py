@@ -316,12 +316,35 @@ def extract_estate_components(text: str, loc_hint: str | None = None) -> ParsedE
     )
 
 
-def is_concrete_estate_location(location: str | None, text: str = "") -> bool:
+def is_ambiguous_carpark_location(location: str | None, text: str | None = None) -> bool:
+    """
+    Return True if carpark/parking is mentioned but the specific level (B1/B2),
+    pillar, or lot number is missing.
+    """
+    combined = f"{location or ''} {text or ''}".lower()
+    has_carpark = bool(re.search(r"\b(carpark|car\s*park|parking|car\s*parking)\b", combined))
+    if not has_carpark:
+        return False
+    # Check if a specific level, lot, or pillar is provided
+    has_specific = bool(
+        re.search(
+            r"\b(b[12]\b|basement\s*[12]|level\s*b[12]|lvl\s*b[12]|lot\s*[0-9a-z\-]+|pillar\s*[0-9a-z\-]+|ev\s*bay|car\s*wash|v0[1-9]|v1[0-9]|v20)\b",
+            combined,
+        )
+    )
+    return not has_specific
+
+
+def is_concrete_estate_location(location: str | None, text: str | None = None) -> bool:
     """
     Determine if a report or location string specifies a concrete estate location.
     Returns True if a block, level, unit, lot, or recognized estate facility is identified.
-    Returns False if only a generic issue description is present (e.g. "there's a water leak").
+    Returns False if only a generic issue description is present (e.g. "there's a water leak")
+    or if an ambiguous carpark reference is given without B1 or B2.
     """
+    if is_ambiguous_carpark_location(location, text):
+        return False
+
     if location and location.strip():
         loc_clean = location.strip()
         if loc_clean.lower() in ("pending confirmation", "pending location confirmation", "unspecified", "none"):
@@ -347,6 +370,7 @@ def is_concrete_estate_location(location: str | None, text: str = "") -> bool:
             return True
 
     return False
+
 
 
 class ParsedNoiseDetails(NamedTuple):
