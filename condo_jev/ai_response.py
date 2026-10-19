@@ -26,7 +26,30 @@ def generate_ai_resident_reply(
 
     # 1. EMERGENCY
     if is_emergency:
-        if re.search(r"\b(trapped|stuck|elevator|lift)\b", text, re.IGNORECASE):
+        # Child / infant entrapment, head stuck, severe fall, medical crisis
+        if re.search(r"\b(baby|infant|child|toddler|kid|head\s+stuck)\b", text, re.IGNORECASE) and re.search(r"\b(stuck|trapped|dropped|fell|fall|unconscious|choking|bleeding|drown|hurt|balcony|toilet)\b", text, re.IGNORECASE):
+            where = f" at {loc}" if has_loc else ""
+            loc_req = "" if has_loc else f"\n\n*Please reply with your block and unit immediately.*{_LEVELS_GUIDE}"
+            return (
+                f"CRITICAL LIFE-SAFETY EMERGENCY: Child medical & rescue priority logged{where}!\n\n"
+                f"1. **DIAL 995 (SCDF AMBULANCE & RESCUE) IMMEDIATELY**.\n"
+                f"2. **CALL 24/7 GUARDHOUSE AT `+65 6789 0123`**: On-duty security has been alerted for immediate first-responder assistance.\n"
+                f"3. Do not pull or wrench violently; keep airways clear and support the child's head and neck until SCDF arrives.{loc_req}"
+            )
+
+        # Fall from height / balcony / window / ledge
+        if re.search(r"\b(dropped|fell|fall|falling|jumped)\b", text, re.IGNORECASE) and re.search(r"\b(balcony|window|ledge|railing|roof|parapet|stairs)\b", text, re.IGNORECASE):
+            where = f" at {loc}" if has_loc else ""
+            loc_req = "" if has_loc else f"\n\n*Please state your block and unit or drop location immediately.*{_LEVELS_GUIDE}"
+            return (
+                f"CRITICAL LIFE-SAFETY EMERGENCY: Fall from height logged{where}!\n\n"
+                f"1. **DIAL 995 (SCDF AMBULANCE & RESCUE) IMMEDIATELY**.\n"
+                f"2. **CALL 24/7 GUARDHOUSE AT `+65 6789 0123`**: Security patrol dispatched to provide immediate access and first aid.\n"
+                f"3. Do not attempt to move an injured person unless in immediate secondary danger.{loc_req}"
+            )
+
+        # Lift entrapment
+        if re.search(r"\b(elevator|lift)\b", text, re.IGNORECASE) and re.search(r"\b(trapped|stuck|dropped|broke|falling)\b", text, re.IGNORECASE):
             where = f" at {loc}" if has_loc else ""
             if not has_loc:
                 return (

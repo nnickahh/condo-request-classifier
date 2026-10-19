@@ -837,3 +837,25 @@ def test_audio_pending_and_text_self_transcription(tmp_path: Path):
     popped = session_store.pop_pending_photo(res_id)
     assert popped == audio_path
     assert session_store.pop_pending_photo(res_id) is None
+
+
+def test_child_and_infant_emergency_life_safety(temp_store: WorkOrderStore, triage_service: JevTriageService):
+    scenarios = [
+        "my baby's head got stuck in the toilet",
+        "i dropped my baby on the balcony by accident",
+    ]
+    for text in scenarios:
+        req = ResidentRequest(text=text, channel="Telegram")
+        dec = triage_service.classify(req)
+        assert dec.priority == Priority.EMERGENCY
+        assert dec.nouls.get("life_safety_hazard", 0.0) >= 0.50
+
+        wo = temp_store.create_work_order(req, dec, resident_id="user_emergency_test")
+        card = format_telegram_resident_card(wo)
+        assert "URGENT EMERGENCY REPORT" in card
+        assert "CRITICAL LIFE-SAFETY EMERGENCY" in card
+        assert "995" in card  # SCDF ambulance
+        assert "999" in card  # Police
+        assert "+65 6789 0123" in card  # 24/7 Guardhouse
+        assert text in card
+

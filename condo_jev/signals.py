@@ -51,6 +51,22 @@ _EMERGENCY_PATTERNS: list[tuple[re.Pattern[str], Category, str]] = [
     ),
     (
         re.compile(
+            r"\b(?:dropped\s+(?:(?:my|a)\s+)?(?:baby|infant|child|toddler|kid)|(?:baby|infant|child|toddler|kid|someone|person)\s+(?:has\s+)?(?:fell|dropped|fallen|jumped|tumbling)\s+(?:from|off|on|over|down)\s+(?:the\s+)?(?:balcony|window|ledge|railing|roof|parapet|stairs|staircase)|(?:fell|dropped)\s+(?:from|off|over)\s+(?:the\s+)?(?:balcony|window|ledge|railing|parapet))\b",
+            re.IGNORECASE,
+        ),
+        Category.SECURITY,
+        "Critical life-safety emergency: infant or person fallen/dropped from height or balcony.",
+    ),
+    (
+        re.compile(
+            r"\b(?:(?:baby|infant|child|toddler|kid|head|arm|leg|hand)\s+(?:is\s+|got\s+)?(?:stuck|trapped|choking|pinned|wedged|drowning)|(?:head|body|arm|leg)\s+(?:is\s+|got\s+)?(?:stuck|trapped|wedged)\s+(?:in|inside|under|between)|stuck\s+in\s+(?:the\s+)?(?:toilet|commode|bowl|pipe|grille|window|balcony|railing|gate)|choking|suffocating|cannot\s+breathe)\b",
+            re.IGNORECASE,
+        ),
+        Category.SECURITY,
+        "Critical life-safety emergency: child or person trapped, stuck in fixture/railing, or choking.",
+    ),
+    (
+        re.compile(
             r"\b(break-?in\b|breaking\s+into|active\s+break-?in|burglar|intruder|violent\s+fight|someone\s+(is\s+)?trying\s+to\s+force\s+open|armed\s+with|knife|weapon|physical\s+assault|robbery\b|hostage)\b",
             re.IGNORECASE,
         ),
