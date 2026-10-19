@@ -210,6 +210,11 @@ class WorkOrder(StrictModel):
     unit: str | None = None
     issue_reason: str | None = None
 
+    # Multi-language & Transcription
+    original_text: str | None = None
+    detected_language: str | None = None
+    is_transcribed_audio: bool = False
+
     @property
     def display_block(self) -> str:
         if self.block:
@@ -559,9 +564,17 @@ def format_staff_dispatch_alert(wo: WorkOrder) -> str:
         contact = f" (`{wo.technician_phone}`)" if wo.technician_phone else ""
         lines.append(f"• *Assigned Tech:* {wo.assigned_technician}{contact}")
     if wo.photo_path:
-        lines.append(f"• *Attachment:* Photo Evidence (`{Path(wo.photo_path).name}`)")
+        ext = Path(wo.photo_path).suffix.lower()
+        media_type = "Voice/Audio Recording" if ext in (".ogg", ".oga", ".mp3", ".wav", ".m4a") else "Photo Evidence"
+        lines.append(f"• *Attachment:* {media_type} (`{Path(wo.photo_path).name}`)")
 
-    lines.append(f"\n*Issue Report:*\n\"{wo.text}\"")
+    if wo.detected_language and wo.detected_language != "en" and wo.original_text and wo.original_text != wo.text:
+        lines.append(f"\n*Original Report ({wo.detected_language.upper()}):*\n\"{wo.original_text}\"")
+        lines.append(f"*English Translation:*\n\"{wo.text}\"")
+    elif wo.is_transcribed_audio:
+        lines.append(f"\n*Audio Transcript (English):*\n\"{wo.text}\"")
+    else:
+        lines.append(f"\n*Issue Report:*\n\"{wo.text}\"")
     return "\n".join(lines)
 
 

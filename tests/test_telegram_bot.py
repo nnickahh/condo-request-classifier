@@ -745,3 +745,43 @@ def test_audio_evidence_attachment(temp_store: WorkOrderStore, triage_service: J
     assert updated.attachment_filename == "audio_user_audio_20261019_130000.ogg"
 
 
+def test_language_detection_and_translation():
+    from condo_jev.translator import detect_language, translate_text
+
+    # Language detection
+    assert detect_language("泳池水质很脏")[0] == "zh"
+    assert detect_language("Lif rosak di Blok B")[0] == "ms"
+    assert detect_language("Water leaking outside #08-14")[0] == "en"
+    assert detect_language("தண்ணீர் கசிகிறது")[0] == "ta"
+
+    # Translation to English
+    res_zh = translate_text("B2水管爆裂", target_lang="en")
+    assert res_zh.is_translated is True
+    assert "water" in res_zh.translated_text.lower() or "pipe" in res_zh.translated_text.lower() or "burst" in res_zh.translated_text.lower()
+
+    # English text unchanged
+    res_en = translate_text("Water leaking outside #08-14", target_lang="en")
+    assert res_en.is_translated is False
+    assert res_en.translated_text == "Water leaking outside #08-14"
+
+
+def test_telegram_session_store_language_preference(tmp_path: Path):
+    from condo_jev.telegram_bot import TelegramSessionStore
+
+    sess_file = tmp_path / "sessions.json"
+    store = TelegramSessionStore(file_path=sess_file)
+
+    # Default is en
+    assert store.get_language("user_123") == "en"
+
+    # Set preferred language
+    store.set_language("user_123", "zh")
+    assert store.get_language("user_123") == "zh"
+
+    # Set another user
+    store.set_language("user_456", "ms")
+    assert store.get_language("user_456") == "ms"
+    assert store.get_language("user_123") == "zh"
+
+
+

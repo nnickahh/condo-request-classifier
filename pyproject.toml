@@ -18,6 +18,8 @@ dependencies = [
     "typesafe-sdk>=0.7,<1",
     "python-telegram-bot>=21.0,<23",
     "opencv-python-headless>=4.10,<5",
+    "SpeechRecognition>=3.10,<4",
+    "soundfile>=0.12,<1",
 ]
 
 [project.optional-dependencies]
