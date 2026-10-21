@@ -843,17 +843,22 @@ def test_child_and_infant_emergency_life_safety(temp_store: WorkOrderStore, tria
     scenarios = [
         "my baby's head got stuck in the toilet",
         "i dropped my baby on the balcony by accident",
+        "someone is falling from a balcony at Block A!",
+        "someone fell off a balcony",
     ]
     for text in scenarios:
         req = ResidentRequest(text=text, channel="Telegram")
         dec = triage_service.classify(req)
         assert dec.priority == Priority.EMERGENCY
+        assert dec.needs_human_review is True
         assert dec.nouls.get("life_safety_hazard", 0.0) >= 0.50
 
         wo = temp_store.create_work_order(req, dec, resident_id="user_emergency_test")
+        assert wo.needs_human_review is True
         card = format_telegram_resident_card(wo)
         assert "URGENT EMERGENCY REPORT" in card
         assert "CRITICAL LIFE-SAFETY EMERGENCY" in card
+        assert "ESCALATED TO LIVE HUMAN AGENT" in card
         assert "995" in card  # SCDF ambulance
         assert "999" in card  # Police
         assert "+65 6789 0123" in card  # 24/7 Guardhouse
@@ -877,3 +882,62 @@ def test_semantic_intent_domain_recognition(triage_service: JevTriageService):
         dec = triage_service.classify(ResidentRequest(text=text, channel="Telegram"))
         assert dec.category == exp_cat, f"Expected {exp_cat} for '{text}', got {dec.category}"
         assert dec.priority == exp_prio, f"Expected {exp_prio} for '{text}', got {dec.priority}"
+
+
+def test_facility_defect_report_not_intercepted_by_faq(temp_store: WorkOrderStore, triage_service: JevTriageService):
+    from condo_jev.condo_enquiries_rag import answer_condo_enquiry
+    from condo_jev.signals import extract_location
+    from condo_jev.estate_directory import is_concrete_estate_location
+
+    bot = CondoManagementTelegramBot(
+        triage_service=triage_service,
+        work_order_store=temp_store,
+    )
+
+    defect_msg = "The tennis court net is torn and sagging, and there was a lot of empty beer bottles and trash left on the benches from last night."
+    # 1. RAG FAQ must NOT intercept this defect report
+    faq_ans = answer_condo_enquiry(defect_msg)
+    assert faq_ans is None, "Defect report was incorrectly intercepted by FAQ"
+
+    # 2. Location extracted must be tennis court (and NOT 'lot of')
+    loc = extract_location(defect_msg)
+    assert loc == "tennis court"
+    assert is_concrete_estate_location(loc, defect_msg) is True
+
+    # 3. Legitimate question must still be answered by RAG
+    faq_q = answer_condo_enquiry("What are the tennis court operating hours?")
+    assert faq_q is not None
+    assert faq_q["article_id"] == "FAC-TENNIS"
+
+    # 4. Work order is successfully created with correct location and dual-team acknowledgement
+    wo, card = bot.process_resident_report(defect_msg, resident_id="tennis_reporter")
+    assert wo.work_order_id.startswith("WO-EST-")
+    assert "tennis court" in wo.location.lower()
+    assert "*FACILITIES & CLEANLINESS ISSUE*" in card
+    assert "damaged tennis court net" in card
+    assert "Facilities & Housekeeping" in card
+    assert "tennis court" in card.lower()
+    assert "• Make another report: `/new`" in card
+
+
+def test_urgency_escalation_and_priority_update(temp_store: WorkOrderStore, triage_service: JevTriageService):
+    req = ResidentRequest(
+        text="Corridor ceiling leaking outside #08-14.",
+        channel="Telegram",
+        location="#08-14",
+    )
+    dec = triage_service.classify(req)
+    wo = temp_store.create_work_order(req, dec, resident_id="res_urgent_test")
+    assert wo.priority == Priority.HIGH or wo.priority == Priority.NORMAL
+
+    # Escalate priority via update_priority
+    updated = temp_store.update_priority(wo.work_order_id, Priority.HIGH, note="Resident requested urgent escalation: 'sorry, i need it to be fixed now'")
+    assert updated is not None
+    assert updated.priority == Priority.HIGH
+    assert any("urgent escalation" in n.lower() for n in updated.notes)
+
+    # Verify probable location does not misclassify urgency/frustration follow-ups
+    assert _is_probable_location("i'm sorry, can you come faster?") is False
+    assert _is_probable_location("i'm sorry, can you come and fix the court faster?") is False
+    assert _is_probable_location("this is absolutely ridiculous") is False
+

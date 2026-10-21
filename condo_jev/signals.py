@@ -53,7 +53,7 @@ _EMERGENCY_PATTERNS: list[tuple[re.Pattern[str], Category, str]] = [
     ),
     (
         re.compile(
-            r"\b(?:dropped\s+(?:(?:my|a)\s+)?(?:baby|infant|child|toddler|kid)|(?:baby|infant|child|toddler|kid|someone|person)\s+(?:has\s+)?(?:fell|dropped|fallen|jumped|tumbling)\s+(?:from|off|on|over|down)\s+(?:the\s+)?(?:balcony|window|ledge|railing|roof|parapet|stairs|staircase)|(?:fell|dropped)\s+(?:from|off|over)\s+(?:the\s+)?(?:balcony|window|ledge|railing|parapet))\b",
+            r"\b(?:dropped\s+(?:(?:my|a)\s+)?(?:baby|infant|child|toddler|kid)|(?:baby|infant|child|toddler|kid|someone|person|resident|worker|cleaner|man|woman|boy|girl)\s+(?:has\s+|is\s+|just\s+)?(?:fell|falling|dropped|fallen|jumped|jumping|tumbling|hanging)\s+(?:from|off|on|over|down)\s+(?:a\s+|the\s+)?(?:balcony|window|ledge|railing|roof|parapet|stairs|staircase|floor|building|block|tower)|(?:fell|falling|dropped|fallen|jumped|jumping)\s+(?:from|off|over|down)\s+(?:a\s+|the\s+)?(?:balcony|window|ledge|railing|parapet|roof|building|block|tower))\b",
             re.IGNORECASE,
         ),
         Category.SECURITY,
@@ -110,7 +110,7 @@ _LOCATION_PATTERNS: list[re.Pattern[str]] = [
     re.compile(r"\b(?:Basement|Level|Floor)\s*[B0-9]{1,3}\b", re.IGNORECASE),
     re.compile(r"\b(?:Lift|Elevator)\s*(?:Lobby\s*)?[A-F1-9]\b", re.IGNORECASE),
     re.compile(r"\b(?:BBQ\s*Pit\s*\d?|Function\s*Room\s*[A-Z0-9]?|Tennis\s*Court\s*\d?|Clubhouse|Guardhouse|Main\s*Gate|Side\s*Gate|Bin\s*Centre|Swimming\s*Pool|Gym)\b", re.IGNORECASE),
-    re.compile(r"\b(?:Lot|Carpark\s*Lot|Parking\s*Lot|Bay)\s*[A-Za-z0-9\-]{1,8}\b", re.IGNORECASE),
+    re.compile(r"\b(?:Carpark\s*Lot|Parking\s*Lot|Bay|Lot\s*#|Lot\s+(?!of\b)[A-Za-z0-9\-]{1,8}\b)", re.IGNORECASE),
 ]
 
 _TOPIC_KEYWORD_GROUPS: dict[Category, tuple[str, ...]] = {
@@ -118,11 +118,17 @@ _TOPIC_KEYWORD_GROUPS: dict[Category, tuple[str, ...]] = {
         "leak", "leaking", "pipe", "light", "bulb", "lift", "aircon", "air-con", "broken",
         "faulty", "repair", "water heater", "intercom", "pump", "flickering", "shower",
         "shower head", "tap", "faucet", "drain", "choked", "clogged", "flush", "cistern",
-        "toilet bowl", "plumbing", "dripping", "handle", "socket", "power trip", "wiring"
+        "toilet bowl", "plumbing", "dripping", "handle", "socket", "power trip", "wiring",
+        "torn", "sagging", "crack", "cracked", "damaged", "damage", "loose", "detached",
+        "not working", "won't turn on", "not turning on", "malfunctioning", "spoilt"
     ),
     Category.SECURITY: ("access card", "key fob", "guard", "cctv", "tailgat", "suspicious", "stranger", "side gate", "intercom access", "trespass", "security"),
     Category.NOISE: ("loud", "music", "party", "barking", "dog", "noise", "midnight", "drilling", "stomping", "karaoke", "quiet hours", "smoke smell"),
-    Category.CLEANLINESS: ("rubbish", "chute", "bin", "cockroach", "pest", "mosquito", "dirty", "spill", "smelly", "garbage", "rat", "ant", "cleaning", "litter", "stain", "trash"),
+    Category.CLEANLINESS: (
+        "rubbish", "chute", "bin", "cockroach", "pest", "mosquito", "dirty", "spill", "smelly",
+        "garbage", "rat", "ant", "cleaning", "litter", "stain", "trash", "bottles", "beer bottles",
+        "cans", "debris", "vomit", "poop", "uncleaned", "filthy", "murky"
+    ),
     Category.FACILITIES: ("book", "reservation", "reserve", "bbq", "function room", "tennis court", "badminton", "gym slot", "clubhouse", "karaoke room"),
     Category.PARKING: ("parking", "carpark", "lot", "iu", "transponder", "wheel clamp", "visitor pass", "barrier", "ev charger", "license plate", "parked in my"),
     Category.BILLING: ("invoice", "giro", "levy", "maintenance fee", "deposit refund", "receipt", "charged twice", "sinking fund", "payment", "statement", "billing"),

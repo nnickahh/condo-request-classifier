@@ -505,7 +505,14 @@ def format_telegram_resident_card(wo: WorkOrder) -> str:
     ).strip()
 
     is_emerg = wo.priority == Priority.EMERGENCY
-    header = "*URGENT EMERGENCY REPORT*" if is_emerg else f"*{wo.category_title.upper()} ISSUE*"
+    is_compound_fac_clean = reply_text.startswith("Noted on both the damaged")
+    if is_emerg:
+        header = "*URGENT EMERGENCY REPORT*"
+    elif is_compound_fac_clean:
+        header = "*FACILITIES & CLEANLINESS ISSUE*"
+    else:
+        header = f"*{wo.category_title.upper()} ISSUE*"
+    team_display = "Facilities & Housekeeping" if is_compound_fac_clean else wo.assigned_team
     prio_str = "*EMERGENCY*" if is_emerg else f"*Priority:* {wo.priority.value.upper()}"
     loc_display = wo.location if wo.location else "Pending location confirmation"
 
@@ -517,11 +524,11 @@ def format_telegram_resident_card(wo: WorkOrder) -> str:
 
     photo_line = f"\n• *Photo Evidence:* Attached (`{Path(wo.photo_path).name}`)" if wo.photo_path else ""
 
-    # Enrich with Estate Knowledge Graph RAG (Valves, Risers, By-Laws)
+    # Enrich with Estate Knowledge Graph RAG (Valves, Risers, By-Laws) without triggering LLM prose synthesis
     rag_lines = ""
     try:
         from condo_jev.graph_rag import get_estate_vault
-        estate_rag = get_estate_vault().query(wo.text, unit_hint=wo.location, hops=2)
+        estate_rag = get_estate_vault().query(wo.text, unit_hint=wo.location, hops=2, synthesize_answer=False)
         if estate_rag.grounded:
             infras = [i for i in estate_rag.affected_infrastructure if "Unit #" not in i]
             if infras:
@@ -538,9 +545,10 @@ def format_telegram_resident_card(wo: WorkOrder) -> str:
             f"{reply_text}\n\n"
             f"• *Reference:* `#{wo.work_order_id}`\n"
             f"• *Location:* `{loc_display}`\n"
+            f"• *Routing:* **Escalated to Live Human Agent for Immediate Review** (Automated bot handling bypassed)\n"
             f"• *Status:* Priority Emergency Dispatched to {wo.assigned_team}{tech_line}{photo_line}{rag_lines}\n"
             f"• {prio_str} (Estimated SLA: {wo.sla_target})\n\n"
-            f"Our on-duty emergency team has been alerted for immediate intervention.\n\n"
+            f"Our on-duty human management officer and emergency team have been alerted for immediate intervention.\n\n"
             f"*Immediate Emergency Contacts:*\n"
             f"• Police Emergency: `999`\n"
             f"• SCDF (Fire & Ambulance): `995`\n"
@@ -556,7 +564,7 @@ def format_telegram_resident_card(wo: WorkOrder) -> str:
             f"{reply_text}\n\n"
             f"• *Reference:* `#{wo.work_order_id}`\n"
             f"• *Location:* `{loc_display}`\n"
-            f"• *Status:* Assigned to on-duty team ({wo.assigned_team}){tech_line}{photo_line}{rag_lines}\n"
+            f"• *Status:* Assigned to on-duty team ({team_display}){tech_line}{photo_line}{rag_lines}\n"
             f"• {prio_str} (Estimated SLA: {wo.sla_target})\n\n"
             f"Our team has been notified. You may wait for an officer to attend on-site, "
             f"or if you prefer to speak with someone directly, reply here or contact our 24/7 duty desk at `+65 6789 0123`.\n\n"
@@ -597,7 +605,7 @@ def format_resident_receipt(wo: WorkOrder) -> str:
 
 def format_staff_dispatch_alert(wo: WorkOrder) -> str:
     """Format a clean, concise operational alert for estate staff without ML telemetry clutter."""
-    alert_badge = "[URGENT EMERGENCY WORK ORDER]" if wo.priority == Priority.EMERGENCY else "[NEW WORK ORDER DISPATCH]"
+    alert_badge = "[URGENT EMERGENCY WORK ORDER — HUMAN AGENT REVIEW REQUIRED]" if wo.priority == Priority.EMERGENCY else "[NEW WORK ORDER DISPATCH]"
     handle = f"@{wo.resident_username}" if wo.resident_username else f"User {wo.resident_id}"
     resident_info = f"{wo.resident_name} ({handle})" if wo.resident_name else handle
     loc = wo.location or "Pending location confirmation"
@@ -610,6 +618,8 @@ def format_staff_dispatch_alert(wo: WorkOrder) -> str:
         f"• *Team:* {wo.assigned_team}",
         f"• *Priority:* {wo.priority.value.upper()} (SLA: {wo.sla_target})",
     ]
+    if wo.priority == Priority.EMERGENCY:
+        lines.append("• *Action Required:* **IMMEDIATE HUMAN AGENT INTERVENTION & REVIEW** (Bot bypassed)")
     if wo.assigned_technician:
         contact = f" (`{wo.technician_phone}`)" if wo.technician_phone else ""
         lines.append(f"• *Assigned Tech:* {wo.assigned_technician}{contact}")
@@ -930,6 +940,40 @@ class WorkOrderStore:
             if notify_resident and new_status not in (WorkOrderStatus.RESOLVED.value, WorkOrderStatus.CLOSED.value):
                 text, markup = format_resident_status_notification(target_wo, new_status, note)
                 self._notify_resident_async(target_wo, text, markup)
+        return target_wo
+
+    def update_priority(
+        self,
+        query_id: str,
+        new_priority: Priority | str,
+        note: str | None = None,
+    ) -> WorkOrder | None:
+        """Update work order priority (e.g. resident escalates to HIGH / EMERGENCY)."""
+        clean_id = query_id.strip().upper().replace("#", "")
+        now_iso = datetime.now(timezone.utc).isoformat()
+        prio_enum = Priority(new_priority) if isinstance(new_priority, str) else new_priority
+        target_wo: WorkOrder | None = None
+        with self._lock:
+            records = self._read_records()
+            for i, rec in enumerate(records):
+                w_id = str(rec.get("work_order_id", "")).upper()
+                t_id = str(rec.get("ticket_id", "")).upper()
+                if (
+                    clean_id in (w_id, t_id, w_id.replace("WO-", ""), t_id.replace("EST-", ""))
+                    or (clean_id.isdigit() and clean_id in t_id)
+                ):
+                    rec["priority"] = prio_enum.value
+                    rec["updated_at"] = now_iso
+                    note_msg = f"Priority escalated to {prio_enum.value.upper()}"
+                    if note:
+                        note_msg += f" — {note}"
+                    rec.setdefault("notes", []).append(f"[{now_iso}] {note_msg}")
+                    records[i] = rec
+                    self._write_records(records)
+                    target_wo = WorkOrder.model_validate(rec)
+                    break
+        if target_wo:
+            self._trigger_webhook_async("work_order.updated", target_wo)
         return target_wo
 
     def assign_technician(

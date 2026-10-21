@@ -81,6 +81,13 @@ def _is_probable_location(text: str) -> bool:
     clean = text.strip()
     if len(clean) > 80:
         return False
+    # Exclude obvious urgency or frustration follow-ups that don't specify a unit/block number
+    if re.search(
+        r"\b(faster|quicker|sooner|hurry|ridiculous|unacceptable|terrible|angry|furious|still\s+waiting|anyone\s+coming)\b",
+        clean,
+        re.IGNORECASE,
+    ) and not re.search(r"#?[B0-9]{1,2}[-\s]\d{1,4}|\b(?:block|blk|tower)\s*[A-C]\b", clean, re.IGNORECASE):
+        return False
     # Patterns like #05-12, 08-14, #12-34, Blk B, Tower 2, Level 3, Gym, Basement, B1, Pillar
     loc_patterns = [
         r"#?[B0-9]{1,2}[-\s]\d{1,4}",
@@ -320,6 +327,7 @@ class CondoManagementTelegramBot:
         resident_name: str | None = None,
         location_hint: str | None = None,
         photo_path: str | None = None,
+        precomputed_classification: Any = None,
     ) -> tuple[WorkOrder, str]:
         """
         Core triage and work-order generation pipeline:
@@ -335,7 +343,7 @@ class CondoManagementTelegramBot:
             location=extracted_loc,
         )
 
-        classification = self.triage_service.classify(request)
+        classification = precomputed_classification or self.triage_service.classify(request)
         work_order = self.store.create_work_order(
             request=request,
             classification=classification,
@@ -2156,6 +2164,18 @@ class CondoManagementTelegramBot:
                 )
                 return
 
+            # 2.5 Immediate emergency check: if resident reports a life-safety emergency, bypass pending noise/location/handover states!
+            from condo_jev.signals import screen_request_safety
+            _early_safety = screen_request_safety(clean_text)
+            if _early_safety and _early_safety.priority == Priority.EMERGENCY:
+                self.session_store.pop_pending_noise(res_id)
+                self._pending_noise_requests.pop(res_id, None)
+                self.session_store.pop_pending_location(res_id)
+                self._pending_location_requests.pop(res_id, None)
+                pending_photo = self.session_store.pop_pending_photo(res_id)
+                await _handle_text_report(update, context, clean_text, photo_path=pending_photo)
+                return
+
             # 3. Check if resident is responding to "talking to a person or team?"
             pending_handover = self.session_store.pop_pending_handover(res_id) or self._pending_handover_questions.pop(res_id, None)
             if pending_handover:
@@ -2434,18 +2454,212 @@ class CondoManagementTelegramBot:
                     )
                     return
 
-            # 5. Direct request to speak with a human/person
-            if re.search(r"\b(talk\s+to\s+a\s+person|speak\s+to\s+a\s+(person|human)|human\s+agent|contact\s+a\s+person|talk\s+to\s+human)\b", clean_text, re.IGNORECASE):
-                await update.message.reply_text(
-                    "Our estate management team is at your service.\n\n"
-                    "*Direct Contacts:*\n"
-                    "• Estate Management Office: `+65 6789 0125` (Mon–Fri 9:00 AM – 6:00 PM)\n"
-                    "• 24/7 Security Guardhouse: `+65 6789 0123`\n"
-                    "• Lift Emergency Desk: `+65 6789 0124`\n\n"
-                    "If you have an active ticket number (e.g., `WO-EST-1042`), please let me know and I will flag it for our on-duty manager.",
-                    parse_mode=ParseMode.MARKDOWN,
-                )
-                return
+            # 4.5 Check for Frustration / Anger (Scenario 4.2 - checked before pure urgency so combined "come faster / ridiculous" gets full management apology & escalation)
+            is_frustration_followup = bool(re.search(
+                r"\b(ridiculous|unacceptable|pathetic|useless|incompetent|disgraceful|outrageous|absurd|"
+                r"third\s+time|second\s+time|complained\s+\d+\s+times|reported\s+this\s+(?:multiple|many|several)\s+times|"
+                r"angry|furious|frustrated|fed\s+up|sick\s+of\s+this|mcst\s+agm|taking\s+this\s+to|"
+                r"terrible\s+service|horrible\s+service|worst\s+service|awful\s+service|nobody\s+came|no\s+one\s+came)\b",
+                clean_text,
+                re.IGNORECASE,
+            ))
+            if is_frustration_followup:
+                last_wo_id = self.session_store.get_last_work_order(res_id)
+                target_wo = self.store.get(last_wo_id) if last_wo_id else None
+                if target_wo and target_wo.status not in (WorkOrderStatus.CLOSED.value, "Closed"):
+                    self.store.update_priority(
+                        target_wo.work_order_id,
+                        Priority.HIGH,
+                        note=f"Resident expressed frustration: \"{clean_text.strip()}\"",
+                    )
+                    if self.staff_chat_id:
+                        staff_frust_alert = (
+                            f"*[MANAGEMENT ESCALATION ALERT]*\n"
+                            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                            f"• *Ticket:* `#{target_wo.work_order_id}`\n"
+                            f"• *Resident:* {target_wo.resident_name or ('@' + target_wo.resident_username if target_wo.resident_username else f'User {target_wo.resident_id}')}\n"
+                            f"• *Location:* `{target_wo.location or 'Pending location confirmation'}`\n"
+                            f"• *Department:* {target_wo.category_title}\n"
+                            f"• *Resident Feedback:* \"{clean_text.strip()}\"\n\n"
+                            f"Escalated to HIGH PRIORITY — immediate supervisor follow-up required."
+                        )
+                        await self._dispatch_to_staff(
+                            context=context,
+                            text=staff_frust_alert,
+                            category=target_wo.category,
+                            priority=Priority.HIGH,
+                        )
+                    has_concrete_loc = is_concrete_estate_location(target_wo.location, target_wo.text)
+                    loc_tag = f" (`{target_wo.location}`)" if has_concrete_loc and target_wo.location else ""
+                    loc_reminder = (
+                        ""
+                        if has_concrete_loc
+                        else (
+                            f"\n\n*To dispatch our officer to your exact location immediately, please reply with your Block and Unit Number* (e.g. `Block B, #08-14`):\n"
+                            f"{format_estate_levels_clarification()}"
+                        )
+                    )
+                    frust_reply = (
+                        f"*MANAGEMENT ESCALATION NOTICE*\n"
+                        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                        f"We sincerely apologize for the delay and frustration caused.\n\n"
+                        f"I have immediately escalated your active ticket *`#{target_wo.work_order_id}`*{loc_tag} to *HIGH PRIORITY* "
+                        f"and flagged it directly to our Senior Property Manager and on-duty supervisor for urgent intervention.\n\n"
+                        f"An officer will attend on-site as a priority and follow up with you directly.{loc_reminder}\n\n"
+                        f"• *Urgent On-Site Escalation:* `+65 6789 0123` (24/7 Guardhouse Duty Officer)\n"
+                        f"• *Estate Office Direct Line:* `+65 6789 0125`"
+                    )
+                    await update.message.reply_text(frust_reply, parse_mode=ParseMode.MARKDOWN)
+                    return
+                else:
+                    frust_no_wo_reply = (
+                        f"*URGENT MANAGEMENT ASSISTANCE*\n"
+                        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                        f"We sincerely apologize for the inconvenience and are on standby to assist you immediately.\n\n"
+                        f"Please reply with *what happened and your unit or location* (e.g. _\"Pipe burst in master bathroom #12-04\"_), "
+                        f"or contact our duty desk directly:\n\n"
+                        f"• *24/7 Security Guardhouse:* `+65 6789 0123`\n"
+                        f"• *Estate Management Office:* `+65 6789 0125`\n"
+                        f"• *Life-Safety Emergency (SCDF):* `995`\n\n"
+                        f"As soon as you share the issue and location, our on-duty team will be dispatched on-site with high priority."
+                    )
+                    await update.message.reply_text(frust_no_wo_reply, parse_mode=ParseMode.MARKDOWN)
+                    return
+
+            # 4.6 Check for Urgency / Impatience follow-up ("can you come faster", "come and fix it faster", "need it to be fixed now", "hurry up", etc.)
+            is_urgency_followup = bool(re.search(
+                r"\b("
+                r"come\s+(?:and\s+)?(?:fix|clean|check|attend|help)|"
+                r"(?:come|fix|clean|attend|repair|resolve|send\s+someone)\s+(?:it\s+|this\s+)?(?:faster|quicker|sooner|now|immediately|asap|right\s+away)|"
+                r"need\s+(?:it|this)\s+(?:to\s+be\s+)?(?:fixed|cleaned|done|resolved)\s*(?:now|faster|quicker|sooner|asap|urgently)?|"
+                r"faster|quicker|sooner|speed\s+up|hurry\s+up|hurry|asap|urgent|urgently|"
+                r"is\s+anyone\s+coming|anyone\s+coming|when\s+(?:is|are)\s+(?:they|someone|anyone|the\s+tech\w*|the\s+cleaner\w*)\s+coming|"
+                r"still\s+waiting|taking\s+so\s+long|taking\s+forever|how\s+much\s+longer|"
+                r"it'?s\s+getting\s+worse|getting\s+worse|can(?:'?t|not)\s+wait"
+                r")\b",
+                clean_text,
+                re.IGNORECASE,
+            ))
+            if is_urgency_followup:
+                last_wo_id = self.session_store.get_last_work_order(res_id)
+                target_wo = self.store.get(last_wo_id) if last_wo_id else None
+                if target_wo and target_wo.status not in (WorkOrderStatus.CLOSED.value, "Closed"):
+                    self.store.update_priority(
+                        target_wo.work_order_id,
+                        Priority.HIGH,
+                        note=f"Resident requested urgent escalation: \"{clean_text.strip()}\"",
+                    )
+                    if self.staff_chat_id:
+                        staff_escalation = (
+                            f"*[RESIDENT URGENT ESCALATION]*\n"
+                            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                            f"• *Ticket:* `#{target_wo.work_order_id}`\n"
+                            f"• *Resident:* {target_wo.resident_name or ('@' + target_wo.resident_username if target_wo.resident_username else f'User {target_wo.resident_id}')}\n"
+                            f"• *Location:* `{target_wo.location or 'Pending location confirmation'}`\n"
+                            f"• *Department:* {target_wo.category_title}\n"
+                            f"• *Resident Note:* \"{clean_text.strip()}\"\n\n"
+                            f"Resident requested immediate attendance on-site."
+                        )
+                        await self._dispatch_to_staff(
+                            context=context,
+                            text=staff_escalation,
+                            category=target_wo.category,
+                            priority=Priority.HIGH,
+                        )
+
+                    has_concrete_loc = is_concrete_estate_location(target_wo.location, target_wo.text)
+                    if not has_concrete_loc:
+                        urgency_loc_reply = (
+                            f"*URGENT ESCALATION NOTED — LOCATION REQUIRED*\n"
+                            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                            f"We have escalated your ticket *`#{target_wo.work_order_id}`* (_{target_wo.text}_) "
+                            f"to *HIGH PRIORITY* and placed our on-duty team on standby.\n\n"
+                            f"*To dispatch our officer to you immediately, please reply with your Block and Unit Number* (e.g. `Block B, #08-14`):\n"
+                            f"{format_estate_levels_clarification()}\n\n"
+                            f"Or call our *24/7 Guardhouse Desk* directly at `+65 6789 0123` for immediate dispatch."
+                        )
+                        await update.message.reply_text(urgency_loc_reply, parse_mode=ParseMode.MARKDOWN)
+                        return
+
+                    loc_part = f" at `{target_wo.location}`" if target_wo.location else ""
+                    urgency_reply = (
+                        f"*URGENT ESCALATION NOTED*\n"
+                        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                        f"We understand this requires immediate attention.\n\n"
+                        f"I have escalated your active ticket *`#{target_wo.work_order_id}`* (_{target_wo.text}_){loc_part} "
+                        f"to *HIGH PRIORITY* and alerted our on-duty supervisor.\n\n"
+                        f"*For immediate on-site attendance right now:*\n"
+                        f"• *24/7 Guardhouse Desk:* `+65 6789 0123`\n"
+                        f"• *Estate Management Office:* `+65 6789 0125`\n\n"
+                        f"Our on-duty officer has been flagged to attend to your location promptly."
+                    )
+                    await update.message.reply_text(urgency_reply, parse_mode=ParseMode.MARKDOWN)
+                    return
+                else:
+                    no_ticket_reply = (
+                        f"*EMERGENCY ASSISTANCE*\n"
+                        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                        f"We are on standby to assist you immediately.\n\n"
+                        f"Please reply with *what happened and your unit number* (e.g. _\"Pipe burst in master bathroom #12-04\"_), "
+                        f"or contact our duty desk directly:\n\n"
+                        f"• *24/7 Security Guardhouse:* `+65 6789 0123`\n"
+                        f"• *Life-Safety Emergency (SCDF):* `995`\n\n"
+                        f"As soon as you provide your location, our on-duty team will be dispatched on-site right away."
+                    )
+                    await update.message.reply_text(no_ticket_reply, parse_mode=ParseMode.MARKDOWN)
+                    return
+
+            # 5. Direct request to speak with a human/person (Scenario 4.1)
+            if re.search(r"\b(talk\s+to\s+(a\s+)?(person|human|someone)|speak\s+to\s+(a\s+)?(person|human|someone|the\s+manager)|human\s+agent|contact\s+a\s+person|talk\s+to\s+human|call\s+me|phone\s+call|speak\s+with\s+(the\s+)?manager|real\s+person)\b", clean_text, re.IGNORECASE):
+                last_wo_id = self.session_store.get_last_work_order(res_id)
+                target_wo = self.store.get(last_wo_id) if last_wo_id else None
+                if target_wo and target_wo.status not in (WorkOrderStatus.CLOSED.value, "Closed"):
+                    self.store.update_status(
+                        target_wo.work_order_id,
+                        target_wo.status,
+                        note="Resident requested officer callback via Telegram",
+                        notify_resident=False,
+                    )
+                    if self.staff_chat_id:
+                        cb_alert = (
+                            f"*[MANAGER CALLBACK REQUESTED]*\n"
+                            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                            f"• *Ticket:* `#{target_wo.work_order_id}`\n"
+                            f"• *Resident:* {target_wo.resident_name or ('@' + target_wo.resident_username if target_wo.resident_username else f'User {target_wo.resident_id}')}\n"
+                            f"• *Location:* `{target_wo.location or 'Estate Common Area'}`\n"
+                            f"• *Department:* {target_wo.category_title}\n"
+                            f"Resident requested direct phone/manager callback."
+                        )
+                        await self._dispatch_to_staff(
+                            context=context,
+                            text=cb_alert,
+                            category=target_wo.category,
+                            priority=Priority.HIGH,
+                        )
+                    msg = (
+                        f"*MANAGER CALLBACK REQUESTED*\n"
+                        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                        f"Your request for direct officer follow-up on Work Order *`#{target_wo.work_order_id}`* "
+                        f"has been flagged for our on-duty estate manager.\n\n"
+                        f"*Direct Contacts for Immediate Assistance:*\n"
+                        f"• *24/7 Security Guardhouse & Intercom:* `+65 6789 0123`\n"
+                        f"• *Estate Management Office:* `+65 6789 0125` (Mon–Fri 9:00 AM – 6:00 PM)\n"
+                        f"• *Lift Emergency Desk:* `+65 6789 0124`\n\n"
+                        f"If you are at home, you can also dial `0` on your wall intercom to connect directly to the guardhouse."
+                    )
+                    await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
+                    return
+                else:
+                    msg = (
+                        "Our estate management team is at your service.\n\n"
+                        "*Direct Contacts:*\n"
+                        "• *Estate Management Office:* `+65 6789 0125` (Mon–Fri 9:00 AM – 6:00 PM)\n"
+                        "• *24/7 Security Guardhouse:* `+65 6789 0123`\n"
+                        "• *Lift Emergency Desk:* `+65 6789 0124`\n\n"
+                        "If you have an active defect or issue to report, please describe it here and I will dispatch our on-duty team immediately."
+                    )
+                    await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
+                    return
 
             # 6. Filter casual greetings and pleasantries ("okay", "thanks", "hello")
             if _is_conversational_reply(clean_text):
@@ -2515,8 +2729,18 @@ class CondoManagementTelegramBot:
                 if trans_res.is_translated:
                     english_text = trans_res.translated_text
 
-            # 1. First check if resident is asking a condo enquiry (RAG Knowledge Base)
-            rag_answer = answer_condo_enquiry(english_text) or answer_condo_enquiry(text_body)
+            # 0. Pre-screen for life-safety emergencies FIRST so they bypass FAQ/location/noise gates
+            extracted_loc = extract_location(english_text) or extract_location(text_body)
+            preview_req = ResidentRequest(
+                text=english_text,
+                channel="Telegram",
+                location=extracted_loc,
+            )
+            preview_decision = self.triage_service.classify(preview_req)
+            is_emergency = preview_decision.priority == Priority.EMERGENCY or preview_decision.nouls.get("life_safety_hazard", 0.0) >= 0.50
+
+            # 1. First check if resident is asking a condo enquiry (RAG Knowledge Base) — skip if emergency!
+            rag_answer = None if is_emergency else (answer_condo_enquiry(english_text) or answer_condo_enquiry(text_body))
             if rag_answer and rag_answer.get("answered"):
                 rag_reply = rag_answer["reply"]
                 if rag_answer.get("article_id") == "FAC-BBQ-CLEAN":
@@ -2630,15 +2854,15 @@ class CondoManagementTelegramBot:
                     await self._dispatch_enquiry_log_to_staff(context, enquiry_log)
                 return
 
-            # Validate location in report against estate directory
-            val_res = validate_estate_location(english_text) or validate_estate_location(text_body)
-            if not val_res.is_valid:
-                await update.message.reply_text(val_res.error_message, parse_mode=ParseMode.MARKDOWN)
-                return
+            # Validate location in report against estate directory (skip blocking if emergency!)
+            if not is_emergency:
+                val_res = validate_estate_location(english_text) or validate_estate_location(text_body)
+                if not val_res.is_valid:
+                    await update.message.reply_text(val_res.error_message, parse_mode=ParseMode.MARKDOWN)
+                    return
 
-            # Check if this is a noise disturbance complaint
-            extracted_loc = extract_location(english_text) or extract_location(text_body)
-            if is_noise_complaint(english_text) or is_noise_complaint(text_body):
+            # Check if this is a noise disturbance complaint (skip noise gating if emergency!)
+            if not is_emergency and (is_noise_complaint(english_text) or is_noise_complaint(text_body)):
                 noise_details = extract_noise_details(english_text)
                 if not noise_details.has_timing_details:
                     # Save pending noise in session and ask clarifying questions
@@ -2658,14 +2882,6 @@ class CondoManagementTelegramBot:
                     await update.message.reply_text(prompt, parse_mode=ParseMode.MARKDOWN)
                     return
 
-            preview_req = ResidentRequest(
-                text=english_text,
-                channel="Telegram",
-                location=extracted_loc,
-            )
-            preview_decision = self.triage_service.classify(preview_req)
-            is_emergency = preview_decision.priority == Priority.EMERGENCY or preview_decision.nouls.get("life_safety_hazard", 0.0) >= 0.50
-
             # Only reject if not an emergency and category is GENERAL or OTHER without noise complaint
             if not is_emergency and preview_decision.category in (Category.GENERAL, Category.OTHER) and not is_noise_complaint(english_text):
                 unrec_msg = (
@@ -2682,13 +2898,14 @@ class CondoManagementTelegramBot:
                 return
 
             try:
-                # Process triage
+                # Process triage (reuse preview_decision to avoid duplicate classification)
                 wo, card_text = self.process_resident_report(
                     text=english_text,
                     resident_id=res_id,
                     resident_username=username,
                     resident_name=full_name,
                     photo_path=photo_path,
+                    precomputed_classification=preview_decision,
                 )
                 wo.original_text = original_input_text
                 wo.detected_language = det_lang
@@ -2874,7 +3091,7 @@ class CondoManagementTelegramBot:
                 now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 print(f"[{now_str}] Online & listening for resident messages...", flush=True)
                 consecutive_errors = 0
-                app.run_polling(drop_pending_updates=False)
+                app.run_polling(drop_pending_updates=True)
                 break
             except KeyboardInterrupt:
                 print("\n[Service Stopped] Telegram bot service terminated by user.", flush=True)

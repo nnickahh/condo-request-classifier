@@ -426,18 +426,45 @@ def answer_condo_enquiry(query: str) -> dict[str, Any] | None:
 
     lowered_query = clean_query.lower()
 
-    # Rule out obvious maintenance/repair issues (e.g. "pipe leak", "bulb flickering")
+    # Rule out obvious maintenance, repair, damage, and cleanliness issues
     maintenance_cues = {
+        # Defects / Damage / Hardware faults
         "leaking", "leak", "flickering", "spoilt", "broken", "pipe burst", "stuck in lift",
-        "noisy", "music is loud", "party", "shouting", "drilling noise"
+        "torn", "sagging", "crack", "cracked", "damaged", "damage", "faulty", "defect",
+        "malfunctioning", "not working", "won't turn on", "not turning on", "loose",
+        "detached", "burnt out", "choked", "clogged", "overflowing", "spill", "spilled",
+        "smell", "foul odor", "stink", "tripped", "power trip", "slipping", "jammed",
+        # Noise / Disturbances
+        "noisy", "music is loud", "party", "shouting", "drilling noise", "screaming", "stomping",
+        # Cleanliness / Hygiene / Waste
+        "trash", "rubbish", "litter", "bottles", "beer bottles", "cans", "dirty", "mess",
+        "messy", "unclean", "uncleaned", "stained", "stain", "murky", "green water", "filthy",
+        "dog poop", "vomit", "cigarettes", "cigarette butts", "leftover", "left on", "debris",
+        # Action / Escalation requests
+        "please fix", "please clean", "please clear", "need repair", "needs repair",
+        "needs cleaning", "repair needed", "cleaners required", "someone left", "abandoned",
+        "need it to be fixed", "need it fixed"
     }
     # Exception: "can i do noisy renovation work" or "what are renovation hours"
     is_renovation_query = any(k in lowered_query for k in ("renovation", "contractor", "contractors", "hacking", "moving", "permit", "noisy work"))
-    if not is_renovation_query and any(cue in lowered_query for cue in maintenance_cues):
+    # Exception: BBQ cleanliness deposit policy ("FAC-BBQ-CLEAN")
+    is_bbq_clean_query = "bbq" in lowered_query and any(k in lowered_query for k in ("clean", "dirty", "uncleaned", "deposit", "previous"))
+    if not is_renovation_query and not is_bbq_clean_query and any(cue in lowered_query for cue in maintenance_cues):
         return None
 
     best_match: dict[str, Any] | None = None
     best_score: float = 0.0
+
+    # Determine if query is asking a question/inquiry vs stating a condition
+    is_question = (
+        "?" in query
+        or any(qw in lowered_query for qw in (
+            "what", "when", "how", "who", "which", "where", "can i", "is it", "are there",
+            "hours", "timing", "time", "fee", "cost", "deposit", "rule", "bylaw",
+            "book", "booking", "reserve", "reservation", "guideline", "policy", "permit",
+            "opening", "closing", "schedule"
+        ))
+    )
 
     for article in KNOWLEDGE_BASE:
         score = 0.0
@@ -467,16 +494,20 @@ def answer_condo_enquiry(query: str) -> dict[str, Any] | None:
             kw_score = min(0.85, 0.30 + matched_kw_count * 0.15)
             score = max(score, kw_score)
 
-        # 3. Title overlap bonus
+        # 3. Title overlap bonus (only grant high bonus if query is phrased as a question/inquiry)
         title_tokens = _tokenize(article["title"])
         common_title = query_tokens.intersection(title_tokens)
-        if len(common_title) >= 2:
-            score = max(score, 0.70)
-        elif len(common_title) == 1 and score > 0.30:
-            score += 0.15
+        if is_question:
+            if len(common_title) >= 2:
+                score = max(score, 0.70)
+            elif len(common_title) == 1 and score > 0.30:
+                score += 0.15
+        else:
+            if len(common_title) >= 2:
+                score = max(score, 0.35)
 
         # Demote generic booking procedures if query is explicitly about cleanliness / dirtiness
-        if article["article_id"] == "FAC-BBQ" and any(w in lowered_query for w in ("clean", "dirty", "uncleaned", "mess", "trash", "rubbish")):
+        if article["article_id"] in ("FAC-BBQ", "FAC-TENNIS", "FAC-GYM", "FAC-POOL") and any(w in lowered_query for w in ("clean", "dirty", "uncleaned", "mess", "trash", "rubbish", "torn", "broken", "bottles")):
             score = max(0.0, score - 0.40)
 
         if score > best_score:

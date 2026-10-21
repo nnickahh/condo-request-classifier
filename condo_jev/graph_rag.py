@@ -415,6 +415,7 @@ class EstateVaultGraph:
         unit_hint: str | None = None,
         hops: int = 1,
         max_notes: int = 12,
+        synthesize_answer: bool = True,
     ) -> EstateRAGResult:
         """
         End-to-End Hybrid Graph RAG Query execution:
@@ -456,14 +457,18 @@ class EstateVaultGraph:
                     }
                 )
 
-        # Synthesize Grounded Answer
-        answer = self._synthesize_grounded_answer(
-            query=user_query,
-            unit_hint=unit_hint,
-            subgraph=subgraph,
-            by_laws=by_laws,
-            infrastructure=infrastructure,
-            contractors=contractors,
+        # Synthesize Grounded Answer (skip expensive LLM call when only metadata is needed)
+        answer = (
+            self._synthesize_grounded_answer(
+                query=user_query,
+                unit_hint=unit_hint,
+                subgraph=subgraph,
+                by_laws=by_laws,
+                infrastructure=infrastructure,
+                contractors=contractors,
+            )
+            if synthesize_answer
+            else ""
         )
 
         return EstateRAGResult(
@@ -480,7 +485,7 @@ class EstateVaultGraph:
         )
 
     def _llm_synthesize(self, query: str, subgraph: dict[str, NoteData]) -> str | None:
-        """Call Gemini to synthesize an answer dynamically from retrieved note bodies."""
+        """Call Gemini Flash to synthesize an answer dynamically from retrieved note bodies."""
         api_key = os.getenv("GEMINI_API_KEY")
         if not api_key:
             return None
